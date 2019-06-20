@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">AyonixAndroidSDKdemo</string>
+    <string name="action_settings">Settings</string>
+        <string name="take_picture">Take picture</string>
+    <string name="textview">TextView</string>
+    <string name="ayonix_faceid">Ayonix FaceID</string>
+    <string name="enroll">Enroll</string>
+    <string name="match">Match</string>
+    <string name="confirm">Confirm</string>
+    <string name="cancel">Cancel</string>
+</resources>
