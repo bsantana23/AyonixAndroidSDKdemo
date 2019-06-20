@@ -507,12 +507,11 @@ public class MainActivity extends AppCompatActivity {
                                 long start = System.currentTimeMillis();
                                 System.out.println("pixels length: " + pixels.length);
                                 for (int i = 0; i < pixels.length; i++) {
-                                    gray[i] = (byte) (255 * Color.luminance(pixels[i]));
+                                    //gray[i] = (byte) (255 * Color.luminance(pixels[i]));
+                                    gray[i] = (byte) pixels[i];
                                 }
                                 long end = System.currentTimeMillis();
                                 System.out.println("Elapsed time: " + (end-start));
-
-                                bitmap.recycle();
 
                                 AyonixImage frame = new AyonixImage(height, width, false, height, gray);
                                 Log.d(TAG3, "got frame: " + frame);
@@ -524,6 +523,7 @@ public class MainActivity extends AppCompatActivity {
 
                                 Log.d(TAG3, "detecting faces...");
                                 textView.append("detecting faces... \n");
+                                bitmap.recycle();
 
                                 if(faceRects.length <= 0) {
                                     textView.append("Cannot detect faces. \n");
@@ -716,7 +716,8 @@ public class MainActivity extends AppCompatActivity {
                                 Log.d(TAG3, "bitmap to pixels complete");
 
                                 for (int i = 0; i < pixels.length; i++) {
-                                    gray[i] = (byte) (255 * Color.luminance(pixels[i]));
+                                    //gray[i] = (byte) (255 * Color.luminance(pixels[i]));
+                                    gray[i] = (byte) pixels[i];
                                 }
 
                                 AyonixImage frame = new AyonixImage(height, width, false, height, gray);
@@ -732,6 +733,7 @@ public class MainActivity extends AppCompatActivity {
                                 AyonixFace[] faces = new AyonixFace[faceRects.length];
                                 float[] scores = new float[faces.length];
                                 Log.d(TAG3, "got faces");
+                                bitmap.recycle();
 
                                 if (faceRects.length <= 0) {
                                     textView.append("Cannot detect faces. \n");
@@ -873,50 +875,6 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG3, "Point2 x: " + point2.x + "     y: " + point2.y);
         }
     }
-
-    /*private void addImageToUI(final byte[] afidByteArray, final int width, final int height){
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                //dynamically add faces to GUI
-                LinearLayout horizontalLayout = new LinearLayout(MainActivity.this);
-                ImageView imageView = findViewById(R.id.imageView);
-
-                File filename = new File(getFilesDir(), "test.jpg"  );
-                try {
-                    OutputStream os = new FileOutputStream(filename);
-                    os.write(afidByteArray);
-                    os.close();
-                } catch (FileNotFoundException e) {
-                    Log.d(TAG3, "file not found");
-                    e.printStackTrace();
-                } catch (IOException e) {
-                    Log.d(TAG3, "failed writing to jpg file");
-                    e.printStackTrace();
-                }
-
-                VideoEncoder encoder = new VideoEncoder(width, height);
-                *//*encoder.start();
-                encoder.onEncodedSample();
-                encoder.stop();*//*
-
-                System.out.println("filename: " + filename.getName());
-                System.out.println("filepath: " + filename.getPath());
-                System.out.println("absolute file: " + filename.getAbsoluteFile());
-                System.out.println("absolute path: " + filename.getAbsolutePath());
-                Bitmap bitmap = BitmapFactory.decodeFile(filename.getPath());
-                imageView.setImageBitmap(bitmap);
-
-                // add something to the right of image view
-                if(null != imageView.getParent())
-                    ((ViewGroup)imageView.getParent()).removeView(imageView);
-                horizontalLayout.addView(imageView);
-
-                // Adds the view to the layout
-                //layout.addView(horizontalLayout);
-            }
-        });
-    }*/
 
     private void registerService() {
         //start foreground service for lock screen
