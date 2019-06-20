@@ -30,7 +30,7 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
     private Context context;
     private Vector<AyonixFace> facesToEnroll;
     private int checkedPosition = -1;
-    private boolean confirmButtonOff = true;
+    protected boolean confirmButtonOff = true;
     private final String TAG = "myAdapter";
 
     public MyAdapter(Vector<AyonixFace> myDataset, Context context) {
@@ -55,8 +55,13 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
     }
 
     @Override
-    public void onBindViewHolder(@NonNull MyViewHolder viewHolder, int i) {
-        viewHolder.bind(facesToEnroll.get(i));
+    public void onBindViewHolder(@NonNull MyViewHolder viewHolder, int index) {
+        // alternate row colors
+        if(index%2 == 1)
+            viewHolder.itemView.setBackgroundColor(Color.parseColor("#6AB8EE"));
+        else
+            viewHolder.itemView.setBackgroundColor(Color.parseColor("#A8D9F8"));
+        viewHolder.bind(facesToEnroll.get(index));
     }
 
     @Override
@@ -95,13 +100,12 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
                 } else {
                     if (checkedPosition == getAdapterPosition()) {
                         check.setVisibility(View.VISIBLE);
-                        this.itemView.setBackgroundColor(Color.parseColor("#064acb"));
+                        this.itemView.setBackgroundColor(Color.parseColor("#B4F8C8"));
                     } else {
                         check.setVisibility(View.GONE);
-                        this.itemView.setBackgroundColor(Color.parseColor("#366ed8"));
+                        this.itemView.setBackgroundColor(Color.parseColor("#0476D0"));
                     }
                 }
-
 
                 Bitmap bm = Bitmap.createBitmap(face.mugshot.width, face.mugshot.height, Bitmap.Config.RGB_565);
                 // always print face features
@@ -124,13 +128,13 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
                     }
                 }*/
 
-
                 bm.setPixels(ret, 0, bm.getWidth(), 0, 0, face.mugshot.width, face.mugshot.height);
 
                 mugshot.setImageBitmap(bm);
                 mugshot.setVisibility(View.VISIBLE);
                 String info = (
                         "       " + (face.gender > 0 ? "female" : "male") + "\n" +
+                        "       age: " + face.age + "y\n"  +
                         "       smile: " + face.expression.smile + "\n" +
                         "       mouth open: " + face.expression.mouthOpen + "\n" +
                         "       quality: " + face.quality + "\n");
@@ -141,7 +145,7 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
                     @Override
                     public void onClick(View v) {
                         check.setVisibility(View.VISIBLE);
-                        v.setBackgroundColor(Color.parseColor("#064acb"));
+                        v.setBackgroundColor(Color.parseColor("#B4F8C8"));
                         if (checkedPosition != getAdapterPosition()) {
                             notifyItemChanged(checkedPosition);
                             checkedPosition = getAdapterPosition();
@@ -150,6 +154,7 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
                 });
 
                 if (confirmButtonOff) {
+                    confirmButtonOff = false;
                     Intent toggleEnrollButton = new Intent("toggle");
                     toggleEnrollButton.setAction("toggle");
                     boolean sent = LocalBroadcastManager.getInstance(context).sendBroadcast(toggleEnrollButton);

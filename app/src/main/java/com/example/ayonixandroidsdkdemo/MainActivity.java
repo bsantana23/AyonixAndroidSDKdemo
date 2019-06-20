@@ -363,6 +363,7 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View v) {
                 if (mAdapter.getSelected() != null) {
                     enroll = false;
+                    mAdapter.confirmButtonOff = true;
                     confirmButton.setVisibility(View.GONE);
                 } else
                     Toast.makeText(MainActivity.this, "No selection made", Toast.LENGTH_SHORT).show();
@@ -610,14 +611,12 @@ public class MainActivity extends AppCompatActivity {
                                         e.printStackTrace();
                                     } finally {
                                         Log.d(TAG3, "  Face[" + (i + 1) + "] " +
-                                                (int) (faces[i].age) + "y " +
-                                                (faces[i].gender > 0 ? "female" : "male") + "\n");
-                                        textView.append("  Face[" + (i + 1) + "] " +
                                                 (faces[i].gender > 0 ? "female" : "male") + "\n" +
-                                                "       age: " + faces[i].age + "y\n" +
+                                                "       age: " + (int) faces[i].age + "y\n" +
                                                 "       smile: " + faces[i].expression.smile + "\n" +
                                                 "       mouth open: " + faces[i].expression.mouthOpen + "\n" +
                                                 "       quality: " + faces[i].quality + "\n");
+
 
                                         if (i == faces.length - 1) {
                                             Log.d(TAG3, "setting faces in adapter");
