@@ -1,26 +1,19 @@
 package com.example.ayonixandroidsdkdemo;
 
-import android.accessibilityservice.GestureDescription;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.annotation.SuppressLint;
 import android.app.KeyguardManager;
 import android.content.BroadcastReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.graphics.BitmapFactory;
-import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.RectF;
-import android.graphics.drawable.Drawable;
 import android.media.ExifInterface;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.PowerManager;
 import android.preference.PreferenceManager;
-import android.provider.ContactsContract;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
-import android.support.design.widget.FloatingActionButton;
 import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.DividerItemDecoration;
@@ -29,12 +22,10 @@ import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
-import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -43,20 +34,14 @@ import android.support.v8.renderscript.*;
 import android.content.Context;
 
 
-
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.io.OutputStream;
-import java.nio.Buffer;
 import java.nio.ByteBuffer;
 
 import android.graphics.Bitmap;
@@ -64,9 +49,10 @@ import android.widget.Toast;
 
 import ayonix.*;
 
-import java.nio.FloatBuffer;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Vector;
 
 import android.Manifest;
@@ -80,7 +66,6 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
-import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
@@ -93,13 +78,9 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.widget.Button;
 
-import androidx.recyclerview.selection.ItemKeyProvider;
-
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.xxxyyy.testcamera2.ScriptC_yuv420888;
-
-import org.w3c.dom.Text;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -111,7 +92,9 @@ public class MainActivity extends AppCompatActivity {
     private Intent alwaysScanIntent;
 
     private RecyclerView recyclerView;
+    private RecyclerView enrolledRecyclerView;
     private MyAdapter mAdapter;
+    private MyAdapter enrolledAdapter;
     private RecyclerView.LayoutManager layoutManager;
     protected TextureView textureView;
     private String cameraId;
@@ -126,7 +109,7 @@ public class MainActivity extends AppCompatActivity {
     private ImageReader enrollReader;
     private ImageReader matchReader;
     private ImageReader mainReader;
-    private File afidDir = null;
+    private File afidFolder = null;
     private Button enrollButton;
     private Button matchButton;
     private Button confirmButton;
@@ -141,6 +124,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean cancel = false;
     public boolean getPoint1 = true;
     private boolean gotFace = false;
+    private boolean isTap = false;
 
     protected AyonixFaceID engine;
     private AyonixFaceTracker faceTracker;
@@ -154,8 +138,10 @@ public class MainActivity extends AppCompatActivity {
     protected SharedPreferences.Editor prefsEditor = null;
     private RenderScript rs;
 
+    protected Map<byte[], EnrolledPersons> masterList = null;
     protected Vector<byte[]> afidVec = null;
-    Vector<AyonixFace> facesToShow = new Vector<>();
+    protected Vector<EnrolledPersons> enrolledPersons = null;
+    protected Vector<AyonixFace> facesToShow = new Vector<>();
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
 
     static {
@@ -166,19 +152,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     //Let client decide what minimum match percentage is
-    private final int minMatch = 90;
-    private final int detectionPeriod = 1;
-    private final int minFaceSize = 40;
-    private final int maxFaceSize = 300;
-    private final float qualityThreshold = 0.6f;
-    int width;
-    int height;
+    private static final int MIN_MATCH = 90;
+    private static final int DETECTION_PERIOD = 1;
+    private static final int MIN_FACE_SIZE = 40;
+    private static final int MAX_FACE_SIZE = 300;
+    private static final float QUALITY_THRESHOLD = 0.5f;
+    private int width;
+    private int height;
 
     private static final String TAG = "Camera2VideoFragment";
-    private static final String TAG2 = "GetMyAFIDs";
+    private static final String TAG2 = "GetMaterList";
     private static final String TAG3 = "main";
     private static final int REQUEST_CAMERA_PERMISSION_RESULT = 0;
     private static final int WRITE_PERMISSION = 100;
+    private float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    private String filesDir = null;
 
 
     private TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
@@ -208,30 +196,48 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public boolean onTouch(View v, MotionEvent event) {
-
-            if(getPoint1) {
-                point1.x = (int) event.getX();
-                point1.y = (int) event.getY();
-                getPoint1 = false;
-            }
-            else {
-                point2.x = (int) event.getX();
-                point2.y = (int) event.getY();
-                getPoint1 = true;
-            }
-
-            switch (event.getAction()) {
+            switch(event.getAction()){
                 case MotionEvent.ACTION_DOWN:
-                    Log.i("TAG", "touched down");
-                    break;
-                case MotionEvent.ACTION_MOVE:
-                    //Log.i("TAG", "moving: (" + x + ", " + y + ")");
-                    break;
-                case MotionEvent.ACTION_UP:
-                    Log.i("TAG", "touched up");
-                    break;
-            }
+                    Log.d(TAG3, "action down");
+                    x1 = event.getX();
+                    y1 = event.getY();
+                    return true;
 
+                case MotionEvent.ACTION_UP:
+                    Log.d(TAG3, "action up");
+                    if(isTap) {
+                        if(getPoints())
+                            setPoints((int) event.getX(),(int) event.getY(), true);
+                        else
+                            setPoints((int) event.getX(),(int) event.getY(), false);
+                        isTap = false;
+                    }
+                    else{
+                        x2 = event.getX();
+                        y2 = event.getY();
+                        if (x2 > x1) {
+                            Log.d(TAG3, "swiped right");
+                            enrolledRecyclerView.setVisibility(View.VISIBLE);
+                            enrolledRecyclerView.setAlpha(0.0f);
+                            enrolledRecyclerView.animate()
+                                    .translationY(enrolledRecyclerView.getWidth())
+                                    .alpha(1.0f)
+                                    .setListener(null);
+                        }
+                        else if(x1 > x2) {
+                            Log.d(TAG3, "swiped left");
+                            enrolledRecyclerView.animate()
+                                    .translationY(0)
+                                    .setListener(new AnimatorListenerAdapter() {
+                                        @Override
+                                        public void onAnimationEnd(Animator animation) {
+                                            super.onAnimationEnd(animation);
+                                            enrolledRecyclerView.setVisibility(View.GONE);
+                                        }
+                                    });
+                        }
+                    }
+            }
             return true;
         }
     };
@@ -267,32 +273,60 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    private void showAllEnrolled(Map<byte[], EnrolledPersons> afids) {
+        for(EnrolledPersons data: afids.values()) {
+            if(data == null)
+                System.out.println("no entry");
+            String info = (
+                    "-----------------------------------------------------------------------------------------------"+
+                            "   age: " + (int)data.age + "y\n" +
+                            "   gender: " + (data.gender > 0 ? "female": data.gender < 0 ? "male": "unknown") + "\n" +
+                            "   quality: " + (data.quality*100) +
+                    "-----------------------------------------------------------------------------------------------"
+            );
+            System.out.println(info);
+        }
+    }
+
+    @SuppressLint({"ClickableViewAccessibility", "CommitPrefEdits"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         mode = "main";
 
+        filesDir = getFilesDir().toString();
+        afidFolder = new File(filesDir + "/afids");
+        afidFolder.mkdirs();
+
         // Retrieve vector of all saved AFIDs
-        afidVec = new Vector<>();
+        /*masterList = new HashMap<>();
         sharedPrefs = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
+        sharedPrefs.edit().remove(TAG2).apply();
         prefsEditor = sharedPrefs.edit();
         gson = new Gson();
         json = sharedPrefs.getString(TAG2, null); //try "" instead of null ???
         //Retrieve previously saved data
         if (json != null) {
-            java.lang.reflect.Type type = new TypeToken<Vector<byte[]>>() {
+            java.lang.reflect.Type type = new TypeToken<HashMap<byte[], EnrolledPersons>>() {
             }.getType();
-            afidVec = gson.fromJson(json, type);
+            masterList = gson.fromJson(json, type);
+        }*/
+        ObjectInputStream ois = null;
+        try {
+            ois = new ObjectInputStream(new FileInputStream(filesDir));
+            if(ois != null)
+                masterList = (HashMap<byte[], EnrolledPersons>) ois.readObject();
+        } catch (IOException | ClassNotFoundException e) {
+            e.printStackTrace();
         }
+
+        showAllEnrolled(masterList);
 
         //set up local broadcasts to either unlock phone at lock screen, or restart service when terminated
         IntentFilter filter = new IntentFilter("unlock");
         filter.addAction("restart");
         filter.addAction("toggle");
         LocalBroadcastManager.getInstance(this).registerReceiver(receive, filter);
-
-        //afid save location????
-        afidDir = new File(getFilesDir().toString() + File.separator + "afids");
 
         //setup UI
         setContentView(R.layout.activity_main);
@@ -310,7 +344,7 @@ public class MainActivity extends AppCompatActivity {
         recyclerView.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false));
         mAdapter = new MyAdapter(facesToShow, this);
         recyclerView.setAdapter(mAdapter);
-
+        recyclerView.setVisibility(View.INVISIBLE);
 
         enrollButton = findViewById(R.id.btn_enroll);
         assert enrollButton != null;
@@ -365,6 +399,8 @@ public class MainActivity extends AppCompatActivity {
                     enroll = false;
                     mAdapter.confirmButtonOff = true;
                     confirmButton.setVisibility(View.GONE);
+                    recyclerView.setVisibility(View.INVISIBLE);
+                    mAdapter.checkedPosition = -11;
                 } else
                     Toast.makeText(MainActivity.this, "No selection made", Toast.LENGTH_SHORT).show();
             }
@@ -400,7 +436,6 @@ public class MainActivity extends AppCompatActivity {
 
         // step 2. get local writable directory, and copy engine to there (for native fopen)
         Log.d(TAG3, "step2");
-        String filesDir = getFilesDir().toString();
 
         try {
             File engineFolder = new File(filesDir + "/engine");
@@ -436,8 +471,8 @@ public class MainActivity extends AppCompatActivity {
             AyonixLicenseStatus licStatus = engine.GetLicenseStatus();
             textView2.append("License " + licStatus.licId + "\n  duration " + licStatus.durationSec + "s\n  remaining " + licStatus.remainingSec + "s\n");
 
-            faceTracker = new AyonixFaceTracker(engine, detectionPeriod, minFaceSize,
-                    maxFaceSize, qualityThreshold);
+            faceTracker = new AyonixFaceTracker(engine, DETECTION_PERIOD, MIN_FACE_SIZE,
+                    MAX_FACE_SIZE, QUALITY_THRESHOLD);
 
             Log.d(TAG3, "face tracker created successfully: " + faceTracker);
             textView2.append("Face Tracker initialized. \n");
@@ -528,27 +563,16 @@ public class MainActivity extends AppCompatActivity {
 
                                 if(faceRects.length <= 0) {
                                     textView.append("Cannot detect faces. \n");
+                                    isTap = true;
                                     runOnUiThread(new Runnable() {
                                         @Override
                                         public void run() { cancelButton.setVisibility(View.VISIBLE); }
                                     });
-                                    recyclerView.setOnTouchListener(new View.OnTouchListener() {
-                                        @Override
-                                        public boolean onTouch(View v, MotionEvent event) {
-                                            if(event.getAction() == MotionEvent.ACTION_UP){
-                                                if(getPoints())
-                                                    setPoints((int) event.getX(),(int) event.getY(), true);
-                                                else
-                                                    setPoints((int) event.getX(),(int) event.getY(), false);
-                                            }
-                                            return true;
-                                        }
-                                    });
+                                    recyclerView.setOnTouchListener(handleTouch);
                                     textView.append("Tap two points (both eyes) to detect face, or cancel.\n");
                                     while (((point1.x == 0.0 && point1.y == 0.0) || (point2.x == 0.0 && point2.y == 0.0)) && !cancel) {
                                         // wait for user to pick 2 points or cancel
                                     }
-                                    Log.d(TAG3, "broke loop");
                                     if(cancel) {
                                         cancel = false;
                                         mode = "main";
@@ -593,63 +617,61 @@ public class MainActivity extends AppCompatActivity {
                                 for (int i = 0; i < faces.length; i++) {
                                     byte[] afidi = new byte[0];
                                     try {
-                                        if(gotFace) {
-                                            facesToShow.add(faces[i]);
-                                            Log.d(TAG3,"face added.");
-                                            gotFace = false;
-                                        }
-                                        else {
+                                        if(!gotFace)
                                             faces[i] = engine.ExtractFaceFromRect(frame, faceRects[i]);
-                                            if (faces[i] != null) {
-                                                facesToShow.add(faces[i]);
-                                                Log.d(TAG3, "face added.");
+                                        else
+                                            gotFace = false;
+                                        // only consider if face is above quality threshold
+                                        if (faces[i] != null && faces[i].quality >= QUALITY_THRESHOLD) {
+                                            facesToShow.add(faces[i]);
+                                            Log.d(TAG3, "  Face[" + (i + 1) + "] " +
+                                                    "       gender: " + (faces[i].gender > 0 ? "female" : "male") + "\n" +
+                                                    "       age: " + (int) faces[i].age + "y\n" +
+                                                    "       smile: " + faces[i].expression.smile + "\n" +
+                                                    "       mouth open: " + faces[i].expression.mouthOpen + "\n" +
+                                                    "       quality: " + faces[i].quality + "\n");
+
+                                            if (i == faces.length - 1) {
+                                                Log.d(TAG3, "setting faces in adapter");
+                                                mAdapter.setFacesToEnroll(facesToShow, faces.length);
+                                                runOnUiThread(new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        mAdapter.notifyDataSetChanged();
+                                                        recyclerView.setVisibility(View.VISIBLE);
+                                                    }
+                                                });
+                                                Log.d(TAG3, "view is visible");
+                                                while (enroll) {
+                                                    /* wait until user confirms enrollment */
+                                                }
+                                                Log.d(TAG3, "enrolling..");
+                                                enroll = true;
+                                                afidi = engine.CreateAfid(mAdapter.getSelected());
+                                                totalSize += afidi.length;
+                                                EnrolledPersons personToEnroll = new EnrolledPersons(faces[i].mugshot, faces[i].quality,
+                                                        faces[i].gender, faces[i].age, afidi);
+                                                masterList.put(afidi, personToEnroll);
+                                                save(masterList);
+                                                mode = "main";
+                                                Log.i("info", "Created " + faces.length + " afids\n");
+                                                Log.i("info", "  Total " + totalSize + " bytes\n");
+                                                facesToShow.clear();
+                                                runOnUiThread(new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        mAdapter.notifyDataSetChanged();
+                                                    }
+                                                });
+                                                image.close();
+                                                textView.setText(null);
+                                                startPreview();
                                             }
                                         }
                                     } catch (AyonixException e) {
                                         Log.d(TAG3, "failed extracting face rectangles");
                                         textView.append("failed extracting face rectangles");
                                         e.printStackTrace();
-                                    } finally {
-                                        Log.d(TAG3, "  Face[" + (i + 1) + "] " +
-                                                (faces[i].gender > 0 ? "female" : "male") + "\n" +
-                                                "       age: " + (int) faces[i].age + "y\n" +
-                                                "       smile: " + faces[i].expression.smile + "\n" +
-                                                "       mouth open: " + faces[i].expression.mouthOpen + "\n" +
-                                                "       quality: " + faces[i].quality + "\n");
-
-
-                                        if (i == faces.length - 1) {
-                                            Log.d(TAG3, "setting faces in adapter");
-                                            mAdapter.setFacesToEnroll(facesToShow, faces.length);
-                                            runOnUiThread(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    mAdapter.notifyDataSetChanged();
-                                                }
-                                            });
-                                            while (enroll) {
-                                                /* wait until user confirms enrollment */
-                                            }
-                                            Log.d(TAG3, "enrolling..");
-                                            enroll = true;
-                                            afidi = engine.CreateAfid(mAdapter.getSelected());
-                                            totalSize += afidi.length;
-                                            afidVec.add(afidi);
-                                            save(afidVec);
-                                            mode = "main";
-                                            Log.i("info", "Created " + faces.length + " afids\n");
-                                            Log.i("info", "  Total " + totalSize + " bytes\n");
-                                            facesToShow.clear();
-                                            runOnUiThread(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    mAdapter.notifyDataSetChanged();
-                                                }
-                                            });
-                                            image.close();
-                                            textView.setText(null);
-                                            startPreview();
-                                        }
                                     }
                                 }
                             } catch (AyonixException | CameraAccessException e) {
@@ -670,14 +692,22 @@ public class MainActivity extends AppCompatActivity {
                             }
                         }
 
-                        private void save(Vector<byte[]> vec) {
+                        private void save(Map<byte[], EnrolledPersons> master) {
                             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
-                                json = gson.toJson(vec);
+                                try {
+                                    ObjectOutputStream outputStream = new ObjectOutputStream(new FileOutputStream(afidFolder));
+                                    outputStream.writeObject(master);
+                                    outputStream.flush();
+                                    outputStream.close();
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+
+                                /*json = gson.toJson(master);
                                 prefsEditor.putString(TAG2, json);
-                                prefsEditor.commit();
+                                prefsEditor.commit();*/
                                 Log.d(TAG3, "saved successful.");
-                                Toast.makeText(MainActivity.this, "Enrolled.", Toast.LENGTH_SHORT).show();
-                                System.out.println("internal afid vector size: " + afidVec.size());
+                                Toast.makeText(MainActivity.this, "Enrolled.", Toast.LENGTH_LONG).show();
                             } else {
                                 if (shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE))
                                     Toast.makeText(MainActivity.this, "App requires access to camera", Toast.LENGTH_SHORT).show();
@@ -803,13 +833,14 @@ public class MainActivity extends AppCompatActivity {
                                             (faces[i].gender > 0 ? "female" : "male") + "\n");
 
                                     byte[] afidData = engine.CreateAfid(faces[i]);
-                                    engine.MatchAfids(afidData, afidVec, scores);
+                                    Vector<byte[]> afids = new Vector<>(masterList.keySet());
+                                    engine.MatchAfids(afidData, afids, scores);
 
                                     Log.i("info", "  Afid[1] vs Afid[" + (i + 1) + "]: " + (100 * scores[i]) + "\n");
                                     String info = ("Afid[1] vs Afid[" + (i + 1) + "]: " + (100 * scores[i]) + "\n");
                                     textView.append(info);
 
-                                    if (100 * scores[i] >= minMatch) {
+                                    if (100 * scores[i] >= MIN_MATCH) {
                                         Toast.makeText(MainActivity.this, "Match successful.\n",
                                                 Toast.LENGTH_SHORT).show();
                                         textView.append("Match successful.");
@@ -887,31 +918,6 @@ public class MainActivity extends AppCompatActivity {
         alwaysScanIntent.setAction("ACTION_START_FOREGROUND_SERVICE");
         alwaysScanIntent.
         startService(alwaysScanIntent);*/
-    }
-
-    public static byte[] encode (float floatArray[]) {
-        byte byteArray[] = new byte[floatArray.length*4];
-
-// wrap the byte array to the byte buffer
-        ByteBuffer byteBuf = ByteBuffer.wrap(byteArray);
-
-// create a view of the byte buffer as a float buffer
-        FloatBuffer floatBuf = byteBuf.asFloatBuffer();
-
-// now put the float array to the float buffer,
-// it is actually stored to the byte array
-        floatBuf.put (floatArray);
-
-        return byteArray;
-    }
-
-    public static byte[] longToBytes(long l) {
-        byte[] result = new byte[8];
-        for (int i = 7; i >= 0; i--) {
-            result[i] = (byte)(l & 0xFF);
-            l >>= 8;
-        }
-        return result;
     }
 
     @Override
@@ -1226,8 +1232,8 @@ public class MainActivity extends AppCompatActivity {
     private void startPreview() throws CameraAccessException {
         final List<Surface> outputSurfaces = new ArrayList<>(2);
         SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
-        //TODO surfaceTexture.setDefaultBufferSize(imageDimension.getWidth(), imageDimension.getHeight());
-        surfaceTexture.setDefaultBufferSize(this.width, this.height);
+        surfaceTexture.setDefaultBufferSize(imageDimension.getWidth(), imageDimension.getHeight());
+        //surfaceTexture.setDefaultBufferSize(this.width, this.height);
         Surface previewSurface = new Surface(surfaceTexture);
         outputSurfaces.add(previewSurface);
 
@@ -1419,19 +1425,19 @@ public class MainActivity extends AppCompatActivity {
         int rotation = this.getWindowManager().getDefaultDisplay().getRotation();
         Matrix matrix = new Matrix();
         RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
-        //TODO RectF bufferRect = new RectF(0, 0, imageDimension.getHeight(), imageDimension.getWidth());
-        RectF bufferRect = new RectF(0, 0, this.height, this.width);
+        RectF bufferRect = new RectF(0, 0, imageDimension.getHeight(), imageDimension.getWidth());
+        //RectF bufferRect = new RectF(0, 0, this.height, this.width);
         float centerX = viewRect.centerX();
         float centerY = viewRect.centerY();
         if (Surface.ROTATION_90 == rotation || Surface.ROTATION_270 == rotation) {
             bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
             matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
-            //TODO float scale = Math.max(
-//TODO                    (float) viewHeight / imageDimension.getHeight(),
-// TODO              (float) viewWidth / imageDimension.getWidth());
             float scale = Math.max(
+                    (float) viewHeight / imageDimension.getHeight(),
+                    (float) viewWidth / imageDimension.getWidth());
+            /*float scale = Math.max(
                     (float) viewHeight / this.height,
-              (float) viewWidth / this.width);
+                    (float) viewWidth / this.width);*/
             matrix.postScale(scale, scale, centerX, centerY);
             matrix.postRotate(90 * (rotation - 2), centerX, centerY);
         }

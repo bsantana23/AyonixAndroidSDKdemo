@@ -29,7 +29,7 @@ import ayonix.AyonixFace;
 public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
     private Context context;
     private Vector<AyonixFace> facesToEnroll;
-    private int checkedPosition = -1;
+    protected int checkedPosition = -1;
     protected boolean confirmButtonOff = true;
     private final String TAG = "myAdapter";
 
@@ -100,10 +100,8 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
                 } else {
                     if (checkedPosition == getAdapterPosition()) {
                         check.setVisibility(View.VISIBLE);
-                        this.itemView.setBackgroundColor(Color.parseColor("#B4F8C8"));
                     } else {
                         check.setVisibility(View.GONE);
-                        this.itemView.setBackgroundColor(Color.parseColor("#0476D0"));
                     }
                 }
 
@@ -115,25 +113,14 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
                 for (int i = 0; i < face.mugshot.data.length; i++)
                 {
                     ret[i] = face.mugshot.data[i]; //& 0xff; // Range 0 to 255, not -128 to 127
-                    //ret[i] = Color.toArgb((long)Color.luminance(ret[i]));
                 }
-
-                /*int row = 0, col = 0;
-                for (int i = 0; i < face.mugshot.data.length; i += 3) {
-                    bm.setPixel(col++, row, face.mugshot.data[i + 2] & face.mugshot.data[i + 1] & face.mugshot.data[i]);
-
-                    if (col == bm.getWidth()) {
-                        col = 0;
-                        row++;
-                    }
-                }*/
 
                 bm.setPixels(ret, 0, bm.getWidth(), 0, 0, face.mugshot.width, face.mugshot.height);
 
                 mugshot.setImageBitmap(bm);
                 mugshot.setVisibility(View.VISIBLE);
                 String info = (
-                        "       " + (face.gender > 0 ? "female" : "male") + "\n" +
+                        "       gender: " + (face.gender > 0 ? "female" : "male") + "\n" +
                         "       age: " + face.age + "y\n"  +
                         "       smile: " + face.expression.smile + "\n" +
                         "       mouth open: " + face.expression.mouthOpen + "\n" +
