@@ -1,8 +1,10 @@
 package com.example.ayonixandroidsdkdemo;
 
+import java.io.Serializable;
+
 import ayonix.AyonixImage;
 
-public class EnrolledPersons {
+public class EnrolledPersons implements Serializable {
 
     public AyonixImage mugshot;
     public float quality;

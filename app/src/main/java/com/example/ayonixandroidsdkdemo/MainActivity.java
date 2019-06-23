@@ -110,6 +110,7 @@ public class MainActivity extends AppCompatActivity {
     private ImageReader matchReader;
     private ImageReader mainReader;
     private File afidFolder = null;
+    private File imageFolder = null;
     private Button enrollButton;
     private Button matchButton;
     private Button confirmButton;
@@ -138,7 +139,7 @@ public class MainActivity extends AppCompatActivity {
     protected SharedPreferences.Editor prefsEditor = null;
     private RenderScript rs;
 
-    protected Map<byte[], EnrolledPersons> masterList = null;
+    protected Map<byte[], File> masterList = null;
     protected Vector<byte[]> afidVec = null;
     protected Vector<EnrolledPersons> enrolledPersons = null;
     protected Vector<AyonixFace> facesToShow = new Vector<>();
@@ -163,6 +164,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "Camera2VideoFragment";
     private static final String TAG2 = "GetMaterList";
     private static final String TAG3 = "main";
+    private static String afidFile = null;
     private static final int REQUEST_CAMERA_PERMISSION_RESULT = 0;
     private static final int WRITE_PERMISSION = 100;
     private float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
@@ -210,7 +212,6 @@ public class MainActivity extends AppCompatActivity {
                             setPoints((int) event.getX(),(int) event.getY(), true);
                         else
                             setPoints((int) event.getX(),(int) event.getY(), false);
-                        isTap = false;
                     }
                     else{
                         x2 = event.getX();
@@ -273,21 +274,6 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    private void showAllEnrolled(Map<byte[], EnrolledPersons> afids) {
-        for(EnrolledPersons data: afids.values()) {
-            if(data == null)
-                System.out.println("no entry");
-            String info = (
-                    "-----------------------------------------------------------------------------------------------"+
-                            "   age: " + (int)data.age + "y\n" +
-                            "   gender: " + (data.gender > 0 ? "female": data.gender < 0 ? "male": "unknown") + "\n" +
-                            "   quality: " + (data.quality*100) +
-                    "-----------------------------------------------------------------------------------------------"
-            );
-            System.out.println(info);
-        }
-    }
-
     @SuppressLint({"ClickableViewAccessibility", "CommitPrefEdits"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -297,6 +283,9 @@ public class MainActivity extends AppCompatActivity {
         filesDir = getFilesDir().toString();
         afidFolder = new File(filesDir + "/afids");
         afidFolder.mkdirs();
+        imageFolder = new File(filesDir + "/images");
+        imageFolder.mkdirs();
+        afidFile = afidFolder.toString() + "/afidlist";
 
         // Retrieve vector of all saved AFIDs
         /*masterList = new HashMap<>();
@@ -313,14 +302,21 @@ public class MainActivity extends AppCompatActivity {
         }*/
         ObjectInputStream ois = null;
         try {
-            ois = new ObjectInputStream(new FileInputStream(filesDir));
-            if(ois != null)
-                masterList = (HashMap<byte[], EnrolledPersons>) ois.readObject();
-        } catch (IOException | ClassNotFoundException e) {
+            ois = new ObjectInputStream(new FileInputStream(afidFile));
+        } catch (IOException e) {
             e.printStackTrace();
         }
-
-        showAllEnrolled(masterList);
+        if(ois == null)
+            masterList = new HashMap<>();
+        else {
+            try {
+                masterList = (HashMap<byte[], File>) ois.readObject();
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
 
         //set up local broadcasts to either unlock phone at lock screen, or restart service when terminated
         IntentFilter filter = new IntentFilter("unlock");
@@ -344,7 +340,7 @@ public class MainActivity extends AppCompatActivity {
         recyclerView.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false));
         mAdapter = new MyAdapter(facesToShow, this);
         recyclerView.setAdapter(mAdapter);
-        recyclerView.setVisibility(View.INVISIBLE);
+        recyclerView.setVisibility(View.VISIBLE);
 
         enrollButton = findViewById(R.id.btn_enroll);
         assert enrollButton != null;
@@ -558,21 +554,62 @@ public class MainActivity extends AppCompatActivity {
                                 AyonixFace[] faces = new AyonixFace[faceRects.length];
 
                                 Log.d(TAG3, "detecting faces...");
-                                textView.append("detecting faces... \n");
                                 bitmap.recycle();
+                                Log.d(TAG3, "recycled");
 
                                 if(faceRects.length <= 0) {
+                                    Log.d(TAG3, "Cannot detect faces.");
                                     textView.append("Cannot detect faces. \n");
                                     isTap = true;
                                     runOnUiThread(new Runnable() {
                                         @Override
                                         public void run() { cancelButton.setVisibility(View.VISIBLE); }
                                     });
-                                    recyclerView.setOnTouchListener(handleTouch);
+                                    /*recyclerView.setOnTouchListener(handleTouch);
+                                    textureView.setOnTouchListener(handleTouch);*/
+                                    /*recyclerView.setOnTouchListener(new View.OnTouchListener() {
+                                        @Override
+                                        public boolean onTouch(View v, MotionEvent event) {
+                                            Log.d(TAG3, "got touch input");
+                                            switch(event.getAction()) {
+                                                case(MotionEvent.ACTION_UP):
+                                                    if(getPoints()) {
+                                                        setPoints((int) event.getX(), (int) event.getY(), true);
+                                                        getPoint1 = false;
+                                                    }
+                                                    else {
+                                                        setPoints((int) event.getX(), (int) event.getY(), false);
+                                                        getPoint1 = false;
+                                                    }
+                                                default:
+                                            }
+                                            return true;
+                                        }
+                                    });*/
+                                    recyclerView.setOnTouchListener(new View.OnTouchListener() {
+                                        @Override
+                                        public boolean onTouch(View v, MotionEvent event) {
+                                            switch(event.getAction()) {
+                                                case(MotionEvent.ACTION_UP):
+                                                    Log.d(TAG3, "action up");
+                                                    if(getPoints()) {
+                                                        setPoints((int) event.getX(), (int) event.getY(), true);
+                                                        getPoint1 = false;
+                                                    }
+                                                    else {
+                                                        setPoints((int) event.getX(), (int) event.getY(), false);
+                                                        getPoint1 = false;
+                                                    }
+                                                default:
+                                            }
+                                            return true;
+                                        }
+                                    });
                                     textView.append("Tap two points (both eyes) to detect face, or cancel.\n");
                                     while (((point1.x == 0.0 && point1.y == 0.0) || (point2.x == 0.0 && point2.y == 0.0)) && !cancel) {
                                         // wait for user to pick 2 points or cancel
                                     }
+                                    isTap = false;
                                     if(cancel) {
                                         cancel = false;
                                         mode = "main";
@@ -588,6 +625,7 @@ public class MainActivity extends AppCompatActivity {
                                         }
                                         if(faces[0] == null) {
                                             recyclerView.setOnTouchListener(null);
+                                            textureView.setOnTouchListener(null);
                                             runOnUiThread(new Runnable() {
                                                 @Override
                                                 public void run() {
@@ -621,8 +659,9 @@ public class MainActivity extends AppCompatActivity {
                                             faces[i] = engine.ExtractFaceFromRect(frame, faceRects[i]);
                                         else
                                             gotFace = false;
+
                                         // only consider if face is above quality threshold
-                                        if (faces[i] != null && faces[i].quality >= QUALITY_THRESHOLD) {
+                                        if (faces[i] != null) { //&& faces[i].quality >= QUALITY_THRESHOLD
                                             facesToShow.add(faces[i]);
                                             Log.d(TAG3, "  Face[" + (i + 1) + "] " +
                                                     "       gender: " + (faces[i].gender > 0 ? "female" : "male") + "\n" +
@@ -637,10 +676,12 @@ public class MainActivity extends AppCompatActivity {
                                                 runOnUiThread(new Runnable() {
                                                     @Override
                                                     public void run() {
+                                                        recyclerView.setBackgroundColor(5091150);
                                                         mAdapter.notifyDataSetChanged();
                                                         recyclerView.setVisibility(View.VISIBLE);
                                                     }
                                                 });
+
                                                 Log.d(TAG3, "view is visible");
                                                 while (enroll) {
                                                     /* wait until user confirms enrollment */
@@ -649,10 +690,7 @@ public class MainActivity extends AppCompatActivity {
                                                 enroll = true;
                                                 afidi = engine.CreateAfid(mAdapter.getSelected());
                                                 totalSize += afidi.length;
-                                                EnrolledPersons personToEnroll = new EnrolledPersons(faces[i].mugshot, faces[i].quality,
-                                                        faces[i].gender, faces[i].age, afidi);
-                                                masterList.put(afidi, personToEnroll);
-                                                save(masterList);
+                                                save(masterList, afidi, faces[i]);
                                                 mode = "main";
                                                 Log.i("info", "Created " + faces.length + " afids\n");
                                                 Log.i("info", "  Total " + totalSize + " bytes\n");
@@ -692,13 +730,23 @@ public class MainActivity extends AppCompatActivity {
                             }
                         }
 
-                        private void save(Map<byte[], EnrolledPersons> master) {
+                        private void save(Map<byte[], File> master, byte[] afid, AyonixFace face) {
                             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
                                 try {
-                                    ObjectOutputStream outputStream = new ObjectOutputStream(new FileOutputStream(afidFolder));
+                                    File jpegFile = new File(imageFolder, "/"+System.currentTimeMillis() + ".jpg");
+                                    FileOutputStream out = new FileOutputStream(jpegFile);
+                                    Bitmap bm = bitmapToImage(face);
+                                    bm.compress(Bitmap.CompressFormat.JPEG, 90, out);
+                                    out.flush();
+                                    out.close();
+
+                                    master.put(afid, jpegFile);
+                                    ObjectOutputStream outputStream = new ObjectOutputStream(new FileOutputStream(afidFile));
                                     outputStream.writeObject(master);
                                     outputStream.flush();
                                     outputStream.close();
+                                    Log.d(TAG3, "saved successful.");
+                                    Toast.makeText(MainActivity.this, "Enrolled.", Toast.LENGTH_LONG).show();
                                 } catch (IOException e) {
                                     e.printStackTrace();
                                 }
@@ -706,8 +754,6 @@ public class MainActivity extends AppCompatActivity {
                                 /*json = gson.toJson(master);
                                 prefsEditor.putString(TAG2, json);
                                 prefsEditor.commit();*/
-                                Log.d(TAG3, "saved successful.");
-                                Toast.makeText(MainActivity.this, "Enrolled.", Toast.LENGTH_LONG).show();
                             } else {
                                 if (shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE))
                                     Toast.makeText(MainActivity.this, "App requires access to camera", Toast.LENGTH_SHORT).show();
@@ -773,11 +819,14 @@ public class MainActivity extends AppCompatActivity {
                                     recyclerView.setOnTouchListener(new View.OnTouchListener() {
                                         @Override
                                         public boolean onTouch(View v, MotionEvent event) {
-                                            if(event.getAction() == MotionEvent.ACTION_UP){
-                                                if(getPoints())
-                                                    setPoints((int) event.getX(),(int) event.getY(), true);
-                                                else
-                                                    setPoints((int) event.getX(),(int) event.getY(), false);
+                                            Log.d(TAG3, "got touch input");
+                                            switch(event.getAction()) {
+                                                case(MotionEvent.ACTION_UP):
+                                                    if(getPoints())
+                                                        setPoints((int) event.getX(),(int) event.getY(), true);
+                                                    else
+                                                        setPoints((int) event.getX(),(int) event.getY(), false);
+                                                default:
                                             }
                                             return true;
                                         }
@@ -886,9 +935,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean getPoints() {
-        if(getPoint1)
-            return true;
-        return false;
+        return getPoint1 == true ? true: false;
     }
 
     private void setPoints(int x, int y, boolean one_or_two) {
@@ -904,6 +951,19 @@ public class MainActivity extends AppCompatActivity {
             getPoint1 = true;
             Log.d(TAG3, "Point2 x: " + point2.x + "     y: " + point2.y);
         }
+    }
+
+    protected static Bitmap bitmapToImage(AyonixFace face){
+        Bitmap bm = Bitmap.createBitmap(face.mugshot.width, face.mugshot.height, Bitmap.Config.RGB_565);
+        // convert byte array to int array, then set pixels into  bitmap to create image
+        int[] ret = new int[face.mugshot.data.length];
+        for (int i = 0; i < face.mugshot.data.length; i++)
+        {
+            ret[i] = face.mugshot.data[i]; //& 0xff; // Range 0 to 255, not -128 to 127
+        }
+
+        bm.setPixels(ret, 0, bm.getWidth(), 0, 0, face.mugshot.width, face.mugshot.height);
+        return bm;
     }
 
     private void registerService() {

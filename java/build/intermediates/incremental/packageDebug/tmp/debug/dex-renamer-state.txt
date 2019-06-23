@@ -1,4 +1,4 @@
-#Mon Jun 17 11:34:59 GMT+09:00 2019
-base.0=C\:\\Users\\ayonix\\Desktop\\AyonixAndroidSDKdemo\\java\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\out
+#Sun Jun 23 22:49:58 JST 2019
+base.0=C\:\\Users\\braul\\OneDrive\\Documents\\Ayonix\\AyonixAndroidSDKdemo\\java\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\out
 path.0=classes.dex
 renamed.0=classes.dex

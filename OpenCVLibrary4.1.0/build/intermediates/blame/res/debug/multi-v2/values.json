@@ -1,10 +1,10 @@
 {
     "logs": [
         {
-            "outputFile": "C:\\Users\\ayonix\\Desktop\\AyonixAndroidSDKdemo\\OpenCVLibrary4.1.0\\build\\intermediates\\incremental\\mergeDebugResources\\merged.dir\\values\\values.xml",
+            "outputFile": "C:\\Users\\braul\\OneDrive\\Documents\\Ayonix\\AyonixAndroidSDKdemo\\OpenCVLibrary4.1.0\\build\\intermediates\\incremental\\mergeDebugResources\\merged.dir\\values\\values.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\ayonix\\Desktop\\AyonixAndroidSDKdemo\\OpenCVLibrary4.1.0\\src\\main\\res\\values\\attrs.xml",
+                    "source": "C:\\Users\\braul\\OneDrive\\Documents\\Ayonix\\AyonixAndroidSDKdemo\\OpenCVLibrary4.1.0\\src\\main\\res\\values\\attrs.xml",
                     "from": {
                         "startLines": "2",
                         "startColumns": "4",

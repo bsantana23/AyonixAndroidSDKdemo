@@ -105,18 +105,8 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
                     }
                 }
 
-                Bitmap bm = Bitmap.createBitmap(face.mugshot.width, face.mugshot.height, Bitmap.Config.RGB_565);
                 // always print face features
-                    // convert byte array to int array, then set pixels into  bitmap to create image
-
-                int[] ret = new int[face.mugshot.data.length];
-                for (int i = 0; i < face.mugshot.data.length; i++)
-                {
-                    ret[i] = face.mugshot.data[i]; //& 0xff; // Range 0 to 255, not -128 to 127
-                }
-
-                bm.setPixels(ret, 0, bm.getWidth(), 0, 0, face.mugshot.width, face.mugshot.height);
-
+                Bitmap bm = MainActivity.bitmapToImage(face);
                 mugshot.setImageBitmap(bm);
                 mugshot.setVisibility(View.VISIBLE);
                 String info = (

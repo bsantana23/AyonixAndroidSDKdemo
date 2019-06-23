@@ -1,4 +1,4 @@
-#Mon Jun 17 11:34:57 GMT+09:00 2019
-base.0=C\:\\Users\\ayonix\\Desktop\\AyonixAndroidSDKdemo\\OpenCVLibrary4.1.0\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\out
+#Sun Jun 23 22:51:03 JST 2019
+base.0=C\:\\Users\\braul\\OneDrive\\Documents\\Ayonix\\AyonixAndroidSDKdemo\\OpenCVLibrary4.1.0\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\out
 path.0=classes.dex
 renamed.0=classes.dex
