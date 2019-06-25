@@ -98,7 +98,7 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
             if(null != face) {
 
                 // check for any matches
-                Vector<byte[]> afids = new Vector<>(masterList.keySet());
+                final Vector<byte[]> afids = new Vector<>(masterList.keySet());
                 float[] scores = new float[afids.size()];
                 try {
                     byte[] afid = engine.CreateAfid(face);
@@ -175,5 +175,9 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
             return facesToEnroll.get(checkedPosition);
         }
         return null;
+    }
+
+    public byte[] getMatchAfid(){
+        return matchAfid;
     }
 }

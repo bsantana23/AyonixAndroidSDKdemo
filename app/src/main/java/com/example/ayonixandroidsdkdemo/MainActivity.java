@@ -126,17 +126,20 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
     private ImageView checkBox;
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
+    private int MAXIMAGES = 15;
     private volatile boolean enroll = true;
     private boolean cancel = false;
     public boolean getPoint1 = true;
     private boolean gotFace = false;
     private boolean isTap = false;
     protected static boolean create = true;
+    private boolean merging = false;
 
     protected AyonixFaceID engine;
     private AyonixFaceTracker faceTracker;
     public AyonixPoint point1 = new AyonixPoint();
     public AyonixPoint point2 = new AyonixPoint();
+    private byte[] mergedAfid;
 
     private String mode = null;
     private RenderScript rs;
@@ -682,7 +685,8 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                 width = imgSizes[0].getWidth();
                 height = imgSizes[0].getHeight();
             }
-            imageReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, 15);
+            
+            imageReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, MAXIMAGES);
             imageReader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
 
                 @Override
@@ -868,8 +872,8 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
 
                                                 if (!create) {
                                                     Log.d(TAG3, "Merging AFIDs...");
+                                                    merging = true;
                                                     afidi = engine.MergeAfids(afidi, mAdapter.matchAfid);
-                                                    //TODO delete old afid ???????????
                                                 }
 
                                                 Log.d(TAG3, "enrolling..");
@@ -1085,9 +1089,10 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
 
                             ArrayList<File> files = new ArrayList<>();
                             // add image to already existing image list
-                            if(masterList.containsKey(afid)){
-                                files = masterList.get(afid);
+                            if(merging){
+                                files = masterList.get(mAdapter.getMatchAfid());
                                 mAdapter.checkedPosition = -1;
+                                merging = false;
                             }
                             files.add(jpegFile);
                             //master.put(afid, files);
@@ -2017,6 +2022,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                     captureRequestBuilder.addTarget(imageReader.getSurface());
                     captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
                     cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, mBackgroundHandler);
+                    MAXIMAGES = 15;
                     break;
 
                 case "enroll":
@@ -2026,6 +2032,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                     captureRequestBuilder.addTarget(imageReader.getSurface());
                     captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
                     cameraCaptureSession.capture(captureRequestBuilder.build(), null, mBackgroundHandler);
+                    MAXIMAGES = 1;
                     break;
 
                 case "match":
@@ -2035,6 +2042,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                     captureRequestBuilder.addTarget(imageReader.getSurface());
                     captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
                     cameraCaptureSession.capture(captureRequestBuilder.build(), null, mBackgroundHandler);
+                    MAXIMAGES = 1;
                     break;
 
                 default:
