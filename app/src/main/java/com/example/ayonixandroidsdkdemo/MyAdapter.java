@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.media.Image;
 import android.support.annotation.NonNull;
 import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.widget.RecyclerView;
@@ -15,26 +14,29 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.IntBuffer;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Vector;
 
+import ayonix.AyonixException;
 import ayonix.AyonixFace;
+import ayonix.AyonixFaceID;
 
 public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
     private Context context;
     private Vector<AyonixFace> facesToEnroll;
+    private HashMap<byte[],  ArrayList<File>> masterList;
+    private AyonixFaceID engine;
     protected int checkedPosition = -1;
     protected boolean confirmButtonOff = true;
     private final String TAG = "myAdapter";
+    protected byte[] matchAfid;
 
-    public MyAdapter(Vector<AyonixFace> myDataset, Context context) {
-        facesToEnroll = myDataset;
+    public MyAdapter(Vector<AyonixFace> myDataset, HashMap<byte[], ArrayList<File>> master, AyonixFaceID engine, Context context) {
+        this.facesToEnroll = myDataset;
+        this.masterList = master;
+        this.engine = engine;
         this.context = context;
     }
 
@@ -50,7 +52,7 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
     @Override
     public MyAdapter.MyViewHolder onCreateViewHolder(@NonNull ViewGroup viewGroup, int i) {
         android.view.View v =  LayoutInflater.from(context).inflate(R.layout.recycle_view_item, viewGroup, false);
-        Log.d(TAG, "creating create view holde");
+        Log.d(TAG, "creating create view holder");
         return new MyViewHolder(v);
     }
 
@@ -77,6 +79,7 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
         private TextView count;
         private ImageView mugshot;
         private ImageView check;
+        private boolean matched = false;
 
         public MyViewHolder(View v) {
             super(v);
@@ -94,6 +97,16 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
             Log.d(TAG, "binding..");
             if(null != face) {
 
+                // check for any matches
+                Vector<byte[]> afids = new Vector<>(masterList.keySet());
+                float[] scores = new float[afids.size()];
+                try {
+                    byte[] afid = engine.CreateAfid(face);
+                    engine.MatchAfids(afid, afids, scores);
+                } catch (AyonixException e) {
+                    e.printStackTrace();
+                }
+
                 // toggle check mark
                 if (checkedPosition == -1) {
                     check.setVisibility(View.GONE);
@@ -109,13 +122,22 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
                 Bitmap bm = MainActivity.bitmapToImage(face);
                 mugshot.setImageBitmap(bm);
                 mugshot.setVisibility(View.VISIBLE);
+                float smile = face.expression.smile*100;
                 String info = (
-                        "       gender: " + (face.gender > 0 ? "female" : "male") + "\n" +
-                        "       age: " + face.age + "y\n"  +
-                        "       smile: " + face.expression.smile + "\n" +
+                        "       "+(face.gender > 0 ? "female" : "male") + "\n" +
+                        "       "+(int)face.age + "y\n"  +
+                        "       "+(smile > 0.7 ? "smiling": smile < 0.7 ? "frowning": "neutral")+ "\n" +
                         "       mouth open: " + face.expression.mouthOpen + "\n" +
-                        "       quality: " + face.quality + "\n");
+                        "       quality: " + face.quality*100 + "\n");
                 faceFeatures.setText(info);
+                for(int j = 0; j < scores.length; j++) {
+                    if(scores[j]*100 >= MainActivity.MIN_MATCH){
+                        faceFeatures.append("Face already enrolled in system. Would you like to add a new face?");
+                        matched = true;
+                        matchAfid = afids.get(j);
+                        break;
+                    }
+                }
 
                 // allows toggling of check mark
                 itemView.setOnClickListener(new View.OnClickListener() {
@@ -127,13 +149,20 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
                             notifyItemChanged(checkedPosition);
                             checkedPosition = getAdapterPosition();
                         }
+                        if(matched){
+                            Intent toggleConfirm_Cancel = new Intent("toggleConfirm_Cancel");
+                            toggleConfirm_Cancel.setAction("toggleConfirm_Cancel");
+                            boolean sent = LocalBroadcastManager.getInstance(context).sendBroadcast(toggleConfirm_Cancel);
+                            Log.d(TAG, "toggle confirm/cancel buttons intent sent " + sent);
+                            matched = false;
+                        }
                     }
                 });
 
                 if (confirmButtonOff) {
                     confirmButtonOff = false;
-                    Intent toggleEnrollButton = new Intent("toggle");
-                    toggleEnrollButton.setAction("toggle");
+                    Intent toggleEnrollButton = new Intent("toggleEnroll");
+                    toggleEnrollButton.setAction("toggleEnroll");
                     boolean sent = LocalBroadcastManager.getInstance(context).sendBroadcast(toggleEnrollButton);
                     Log.d(TAG, "toggle enroll button intent sent " + sent);
                 }

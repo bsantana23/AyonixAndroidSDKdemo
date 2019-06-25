@@ -1,7 +1,7 @@
 #Internal package file, do not edit.
-#Sun Jun 23 22:49:58 JST 2019
+#Mon Jun 24 16:45:29 GMT+09:00 2019
 0.baseType=DIRECTORY
-0.base=C\:\\Users\\braul\\OneDrive\\Documents\\Ayonix\\AyonixAndroidSDKdemo\\java\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\out
+0.base=C\:\\Users\\ayonix\\Documents\\AndroidAndroidSDKdemo_VC\\AyonixAndroidSDKdemo_master\\java\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\out
 0.path=classes.dex
 0.set=DEX
 count=1
