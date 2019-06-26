@@ -12,17 +12,19 @@
 
     <uses-feature android:name="android.hardware.camera2.full" />
     <uses-feature android:name="android.hardware.location.gps" />
-    <uses-feature android:name="android.hardware.camera" />
     <uses-feature android:name="android.hardware.camera.level.full" />
     <uses-feature android:name="android.hardware.camera.front" />
     <uses-feature android:name="persist.camera.legacy_perf" />
+    <uses-feature android:name="android.hardware.camera.capability.manual_post_processing" />
     <uses-feature
         android:name="android.hardware.camera.flash"
         android:required="false" />
-    <uses-feature android:name="android.hardware.camera.capability.manual_post_processing" />
     <uses-feature
         android:name="android.hardware.camera.autofocus"
         android:required="false" />
+    <uses-feature android:name="android.hardware.camera"
+        android:required="true" />
+
 
     <application
         android:allowBackup="true"
@@ -46,6 +48,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <provider
+            android:name="android.support.v4.content.FileProvider"
+            android:authorities="com.example.ayonixandroidsdkdemo"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+
     </application>
 
 </manifest>

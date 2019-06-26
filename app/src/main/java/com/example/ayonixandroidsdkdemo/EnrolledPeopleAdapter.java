@@ -101,7 +101,7 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
                     }
                 }
 
-                if(null != jpegFiles) {
+                if(!jpegFiles.isEmpty()) {
                     Bitmap bm = BitmapFactory.decodeFile(jpegFiles.get(0).getAbsolutePath());
                     mugshot.setImageBitmap(bm);
                     mugshot.setVisibility(View.VISIBLE);

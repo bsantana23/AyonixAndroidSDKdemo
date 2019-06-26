@@ -10,11 +10,17 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Matrix;
 import android.graphics.RectF;
+import android.graphics.drawable.RippleDrawable;
 import android.media.ExifInterface;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.PowerManager;
 import android.preference.PreferenceManager;
+import android.provider.MediaStore;
+import android.support.constraint.ConstraintLayout;
 import android.support.design.widget.FloatingActionButton;
+import android.support.v4.content.FileProvider;
 import android.support.v4.content.LocalBroadcastManager;
 import android.support.v4.view.GestureDetectorCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -54,8 +60,10 @@ import android.widget.Toast;
 
 import ayonix.*;
 
+import java.text.SimpleDateFormat;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Vector;
@@ -126,24 +134,24 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
     private ImageView checkBox;
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
-    private int MAXIMAGES = 15;
+    private int MAXIMAGES = 1;
     private volatile boolean enroll = true;
-    private boolean cancel = false;
     public boolean getPoint1 = true;
     private boolean gotFace = false;
     private boolean isTap = false;
-    protected static boolean create = true;
     private boolean merging = false;
+    private boolean pointsAreOkay = false;
+    private boolean cancel = false;
 
     protected AyonixFaceID engine;
     private AyonixFaceTracker faceTracker;
     public AyonixPoint point1 = new AyonixPoint();
     public AyonixPoint point2 = new AyonixPoint();
-    private byte[] mergedAfid;
 
     private String mode = null;
     private RenderScript rs;
 
+    private ConstraintLayout rootLayout;
     protected HashMap<byte[], ArrayList<File>> masterList = null;
     protected Vector<AyonixFace> facesToShow = new Vector<>();
     protected  Vector<byte[]> afids = null;
@@ -165,6 +173,10 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
     private static final int MIN_FACE_SIZE = 40;
     private static final int MAX_FACE_SIZE = 300;
     private static final float QUALITY_THRESHOLD = 0.5f;
+    static final int REQUEST_IMAGE_CAPTURE = 1;
+    static final int REQUEST_TAKE_PHOTO = 1;
+
+
     private int width;
     private int height;
 
@@ -255,7 +267,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                             animation.setDuration(500);
                             animation.setFillAfter(true);
                             enrolledRecyclerView.startAnimation(animation);
-                            enrolledRecyclerView.setVisibility(View.GONE);
+                            enrolledRecyclerView.setVisibility(View.INVISIBLE);
                         }
                     }
                     break;
@@ -295,26 +307,14 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                     Log.d(TAG3, "toggling..");
                     confirmButton.show();
                     cancelButton.show();
-                    create = false;
+                    merging = true;
                     break;
                 default:
             }
         }
     };
 
-    @SuppressLint({"ClickableViewAccessibility", "CommitPrefEdits"})
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        mode = "main";
-
-        filesDir = getFilesDir().toString();
-        afidFolder = new File(filesDir + "/afids");
-        afidFolder.mkdirs();
-        imageFolder = new File(filesDir + "/images");
-        imageFolder.mkdirs();
-        afidFile = afidFolder.toString() + "/afidlist";
-
+    private void setMasterList(){
         ObjectInputStream ois = null;
         try {
             ois = new ObjectInputStream(new FileInputStream(afidFile));
@@ -330,6 +330,23 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                 e.printStackTrace();
             }
         }
+    }
+
+    @SuppressLint({"ClickableViewAccessibility", "CommitPrefEdits"})
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        mode = "main";
+
+        filesDir = getFilesDir().toString();
+        afidFolder = new File(filesDir + "/afids");
+        afidFolder.mkdirs();
+        imageFolder = new File(filesDir + "/images");
+        imageFolder.mkdirs();
+        afidFile = afidFolder.toString() + "/afidlist";
+
+        setMasterList();
+         rootLayout = new ConstraintLayout(this);
 
         // enable touch gestures, to detect taps and swipes
         OnSwipeListener onSwipeListener = new OnSwipeListener();
@@ -361,6 +378,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         recyclerView.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false));
         recyclerView.setVisibility(View.VISIBLE);
         Log.d(TAG3, "recycler is visible");
+
         /*recyclerView.setOnTouchListener(handleTouch);
         textureView.setOnTouchListener(handleTouch);*/
 
@@ -370,7 +388,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         enrolledRecyclerView.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false));
         enrolledAdapter = new EnrolledPeopleAdapter(masterList,this);
         enrolledRecyclerView.setAdapter(enrolledAdapter);
-        enrolledRecyclerView.setVisibility(View.GONE);
+        enrolledRecyclerView.setVisibility(View.INVISIBLE);
         if(!masterList.isEmpty()) {
             enrolledAdapter.setFacesToEnroll(masterList);
             enrolledAdapter.notifyDataSetChanged();
@@ -385,11 +403,12 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                     Log.e("debug", "cameraDevice is null");
                     return;
                 }
-                mode = "enroll";
+                //mode = "enroll";
                 Log.d(TAG3, "enrolling...\n");
                 enrollButton.setVisibility(View.GONE);
                 matchButton.setVisibility(View.GONE);
-                updatePreview();
+                dispatchTakePictureIntent();
+                //updatePreview();
             }
         });
         Log.d(TAG3, "enroll button created.");
@@ -419,6 +438,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
             public void onClick(View v) {
                 if (mAdapter.getSelected() != null) {
                     enroll = false;
+                    pointsAreOkay = true;
                     mAdapter.confirmButtonOff = true;
                     confirmButton.hide();
                     cancelButton.hide();
@@ -435,7 +455,16 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         cancelButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                cancel = true;
+                Log.d(TAG3, "onClick: cancel button clicked");
+                cancelButton.hide();
+                confirmButton.hide();
+                facesToShow.clear();
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() { mAdapter.notifyDataSetChanged(); }
+                });
+                mode = "main";
+                updatePreview();
             }
         });
 
@@ -445,8 +474,24 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         clearButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                masterList.clear();
-                enrolledAdapter.notifyDataSetChanged();
+                if(!masterList.isEmpty()){
+                    masterList.clear();
+                    enrolledAdapter.notifyDataSetChanged();
+                    Log.d(TAG3, "onClick: masterlist cleared");
+                }
+                File deleteAfids = new File(afidFile + "afidist");
+                if(deleteAfids.exists()) {
+                    deleteAfids.delete();
+                    Log.d(TAG3, "onClick: list deleted!!");
+                    setMasterList();
+                    enrolledAdapter.notifyDataSetChanged();
+                    Log.d(TAG, "onClick: fresh master list set");
+                }
+                clearButton.setVisibility(View.GONE);
+                Animation animation = new TranslateAnimation(0, (-enrolledRecyclerView.getWidth()),0, 0);
+                animation.setDuration(500);
+                animation.setFillAfter(true);
+                enrolledRecyclerView.startAnimation(animation);
             }
         });
 
@@ -524,11 +569,344 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
+            Bundle extras = data.getExtras();
+            Bitmap bitmap = (Bitmap) extras.get("data");
+            //int pixels[] = new int[imageBitmap.getWidth() * imageBitmap.getHeight()];
+            Log.d(TAG3, "onActivityResult: got the bitmap from intent!!!");
+
+            AyonixImage frame;
+            AyonixFace[] faceArray;
+            TextView textView = findViewById(R.id.textView2);
+            try{
+                int pixels[] = new int[bitmap.getWidth() * bitmap.getHeight()];
+                byte[] gray = new byte[width * height];
+                bitmap.getPixels(pixels, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(), bitmap.getHeight());
+                Log.d(TAG3, "pixelated");
+
+                Log.d(TAG3, "onImageAvailable: "+"pixels length: " + pixels.length);
+                for (int i = 0; i < pixels.length; i++) {
+                    //gray[i] = (byte) (255 * Color.luminance(pixels[i]));
+                    gray[i] = (byte) pixels[i];
+                }
+
+                frame = new AyonixImage(height, width, false, height, gray);
+                AyonixFace[] updatedFaces = faceTracker.UpdateTracker(frame);
+                Log.d(TAG3, "updated face using tracker. " + Arrays.toString(updatedFaces));
+                AyonixRect[] faceRects = engine.DetectFaces(frame, 5);
+                faceArray = new AyonixFace[faceRects.length];
+
+                bitmap.recycle();
+                Log.d(TAG3, "detecting faces...");
+
+                // no faces were found
+                if (faceRects.length <= 0) {
+
+                }
+
+                int totalSize = 0;
+                if (!facesToShow.isEmpty())
+                    facesToShow.clear();
+                //facesToShow.setSize(faceRects.length);
+
+                for (int i = 0; i < faceArray.length; i++) {
+                    byte[] afidi = new byte[0];
+                    try {
+                        if (!gotFace)
+                            faceArray[i] = engine.ExtractFaceFromRect(frame, faceRects[i]);
+                        else
+                            gotFace = false;
+
+                        // only consider if face is above quality threshold
+                        if (faceArray[i] != null && faceArray[i].quality >= QUALITY_THRESHOLD) {
+
+                            facesToShow.add(faceArray[i]);
+                            Log.d(TAG3, "  Face[" + (i + 1) + "] " +
+                                    "       gender: " + (faceArray[i].gender > 0 ? "female" : "male") + "\n" +
+                                    "       age: " + (int) faceArray[i].age + "y\n" +
+                                    "       smile: " + faceArray[i].expression.smile + "\n" +
+                                    "       mouth open: " + faceArray[i].expression.mouthOpen + "\n" +
+                                    "       quality: " + faceArray[i].quality + "\n");
+
+                            if (i == faceArray.length - 1) {
+                                Log.d(TAG3, "setting faces in adapter");
+                                mAdapter.setFacesToEnroll(facesToShow, faceArray.length);
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        recyclerView.setBackgroundColor(5091150);
+                                        mAdapter.notifyDataSetChanged();
+                                        recyclerView.setVisibility(View.VISIBLE);
+                                        Log.d(TAG3, "recycler is visible");
+                                    }
+                                });
+
+                                Log.d(TAG3, "view is visible");
+                                while (enroll) {
+                                    /* wait until user confirms enrollment */
+                                }
+                                Log.d(TAG3, "enroll = " + enroll);
+                                enroll = true;
+
+                                Log.d(TAG3, "Creating AFID");
+                                afidi = engine.CreateAfid(mAdapter.getSelected());
+
+                                if (merging) {
+                                    Log.d(TAG3, "Merging AFIDs...");
+                                    afidi = engine.MergeAfids(afidi, mAdapter.getMatchAfid());
+                                }
+
+                                Log.d(TAG3, "enrolling..");
+                                totalSize += afidi.length;
+                                save(afidi, faceArray[i]);
+                                mode = "main";
+                                Log.i(TAG3, "Created " + faceArray.length + " afids\n");
+                                Log.i(TAG3, "  Total " + totalSize + " bytes\n");
+                                facesToShow.clear();
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        mAdapter.notifyDataSetChanged();
+                                    }
+                                });
+                                Log.d(TAG3, "onImageAvailable: leaving enrollment");
+                                updatePreview();
+                            }
+                        }
+                    } catch (AyonixException e) {
+                        Log.d(TAG3, "failed extracting face rectangles");
+                        textView.append("failed extracting face rectangles");
+                        e.printStackTrace();
+                    }
+                }
+            } catch (AyonixException e) {
+                e.printStackTrace();
+            } finally {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Log.d(TAG3, "run: enrollment failed");
+                        enrollButton.setVisibility(View.VISIBLE);
+                        matchButton.setVisibility(View.VISIBLE);
+                    }
+                });
+                facesToShow.clear();
+            }
+        }
+    }
+
+    private void faceNotDetected(AyonixFace[] faceArray, AyonixImage frame){
+        TextView textView = findViewById(R.id.textView2);
+        Log.d(TAG3, "Cannot detect faces.");
+        isTap = true;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                cancelButton.show();
+            }
+        });
+        //recyclerView.setOnTouchListener(handleTouch);
+
+        textView.append("Tap two points (both eyes) to detect face, or cancel.\n");
+        while (((point1.x == 0.0 && point1.y == 0.0) || (point2.x == 0.0 && point2.y == 0.0)) && !cancel) {
+            // wait for user to pick 2 points or cancel
+        }
+        isTap = false;
+        if(cancel)  return;
+
+        textView.append("Are the selected points okay?\n");
+        while(!pointsAreOkay) { /*wait for user to confirm chosen points*/ }
+        if(cancel)  return;
+        pointsAreOkay = false;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                confirmButton.hide();
+                cancelButton.hide();
+            }
+        });
+        if ((point1.x != 0.0 && point1.y != 0.0) && (point2.x != 0.0 && point2.y != 0.0)) {
+            try {
+                faceArray = new AyonixFace[1];
+                faceArray[0] = engine.ExtractFaceFromPts(frame, point1, point2);
+                gotFace = true;
+            } catch (AyonixException e1) {
+                e1.printStackTrace();
+            }
+            if (faceArray[0] == null) {
+                //recyclerView.setOnTouchListener(null);
+                textView.append("no faces were found :( \n");
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Log.d(TAG3, "run: chosen points failed in enrollment");
+                        enrollButton.setVisibility(View.VISIBLE);
+                        matchButton.setVisibility(View.VISIBLE);
+                    }
+                });
+                return;
+            }
+        }
+    }
+
+    private void save(byte[] afid, AyonixFace face) {
+        if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+            ArrayList<File> files = new ArrayList<>();
+            try {
+                File jpegFile = new File(imageFolder, "/"+System.currentTimeMillis() + ".jpg");
+                FileOutputStream out = new FileOutputStream(jpegFile);
+                Bitmap bm = bitmapToImage(face);
+                bm.compress(Bitmap.CompressFormat.JPEG, 90, out);
+                out.flush();
+                out.close();
+
+                // add image to already existing image list
+                if(merging){
+                    files = masterList.get(mAdapter.getMatchAfid());
+                    masterList.remove(mAdapter.getMatchAfid());
+                    mAdapter.checkedPosition = -1;
+                    merging = false;
+                    files.add(0, jpegFile);
+                }
+                else
+                    files.add(jpegFile);
+                masterList.put(afid, files);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        enrolledAdapter.notifyDataSetChanged();
+                    }
+                });
+
+                ObjectOutputStream outputStream = new ObjectOutputStream(new FileOutputStream(afidFile));
+                outputStream.writeObject(masterList);
+                outputStream.flush();
+                outputStream.close();
+                Log.d(TAG3, "saved successful.");
+                Toast.makeText(getBaseContext(), "Enrolled.", Toast.LENGTH_LONG).show();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+                                /*json = gson.toJson(master);
+                                prefsEditor.putString(TAG2, json);
+                                prefsEditor.commit();*/
+        } else {
+            if (shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE))
+                Toast.makeText(MainActivity.this, "App requires access to camera", Toast.LENGTH_SHORT).show();
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, WRITE_PERMISSION);
+        }
+    }
+
+    String currentPhotoPath;
+
+    private File createImageFile() throws IOException {
+        // Create an image file name
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        String imageFileName = "JPEG_" + timeStamp + "_";
+        File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+        File image = File.createTempFile(
+                imageFileName,  /* prefix */
+                ".jpg",         /* suffix */
+                storageDir      /* directory */
+        );
+
+        // Save a file: path for use with ACTION_VIEW intents
+        currentPhotoPath = image.getAbsolutePath();
+        return image;
+    }
+
+    private void dispatchTakePictureIntent() {
+        Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        // Ensure that there's a camera activity to handle the intent
+        if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
+            // Create the File where the photo should go
+            File photoFile = null;
+            try {
+                photoFile = createImageFile();
+            } catch (IOException ex) {
+                // Error occurred while creating the File
+            }
+            // Continue only if the File was successfully created
+            if (photoFile != null) {
+                Uri photoURI = FileProvider.getUriForFile(this,
+                        "com.example.ayonixandroidsdkdemo",
+                        photoFile);
+                //takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoURI);
+                startActivityForResult(takePictureIntent, REQUEST_TAKE_PHOTO);
+            }
+        }
+    }
+
+        @Override
     public boolean onTouchEvent(MotionEvent event) {
         // Pass activity on touch event to the gesture detector.
-        System.out.println("should be okay pero like");
+        Log.d(TAG, "onTouchEvent: called");
         gestureDetectorCompat.onTouchEvent(event);
         return true;
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        Log.d(TAG, "dispatchTouchEvent: called");
+        View v = getCurrentFocus();
+        switch(event.getAction()){
+            case MotionEvent.ACTION_DOWN:
+                Log.d(TAG3, "action down");
+                x1 = event.getX();
+                y1 = event.getY();
+                break;
+
+            case MotionEvent.ACTION_UP:
+                Log.d(TAG3, "action up");
+                x2 = event.getX();
+                y2 = event.getY();
+                if(isTap) {
+                    if(getPoints()) {
+                        setPoints((int) event.getX(), (int) event.getY(), true);
+                        getPoint1 = false;
+                    }
+                    else {
+                        setPoints((int) event.getX(), (int) event.getY(), false);
+                        getPoint1 = true;
+                    }
+                }
+                else{
+                    if (x2 > x1) {
+                        Log.d(TAG3, "swiped right");
+                        if(masterList.isEmpty()){
+                            TextView textView = findViewById(R.id.textView2);
+                            textView.append("\n No enrolled people in system. \n");
+                        }
+                        else {
+                            Animation animation = new TranslateAnimation(-(enrolledRecyclerView.getWidth()), 0, 0, 0);
+                            animation.setDuration(500);
+                            animation.setFillAfter(true);
+                            enrolledRecyclerView.startAnimation(animation);
+                            enrolledRecyclerView.setVisibility(View.VISIBLE);
+                            clearButton.setVisibility(View.VISIBLE);
+                            if (enrolledRecyclerView.getParent() == null){
+                                rootLayout.addView(enrolledRecyclerView);
+                                Log.d(TAG3, "dispatchTouchEvent: added");
+                            }
+                        }
+                    }
+                    else if(x1 > x2) {
+                        Log.d(TAG3, "swiped left");
+                        Animation animation = new TranslateAnimation(0, (-enrolledRecyclerView.getWidth()),0, 0);
+                        animation.setDuration(500);
+                        animation.setFillAfter(true);
+                        enrolledRecyclerView.startAnimation(animation);
+                        enrolledRecyclerView.setVisibility(View.INVISIBLE);
+                        clearButton.setVisibility(View.GONE);
+                        rootLayout.removeView(enrolledRecyclerView);
+                        Log.d(TAG3, "dispatchTouchEvent: removed");
+                    }
+                }
+                break;
+        }
+        return super.dispatchTouchEvent(event);
     }
 
     @Override
@@ -568,6 +946,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
 
     @Override
     public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+        Log.d(TAG3, "onFling: I was flung!");
         return false;
     }
 
@@ -594,6 +973,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         public void run() {
             Log.d("thread running??", "yay!");
             try {
+                start = System.currentTimeMillis();
                 pixels = new int[bitmap.getWidth() * bitmap.getHeight()];
                 gray = new byte[width * height];
 
@@ -631,10 +1011,6 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                 } catch (AyonixException e) {
                     e.printStackTrace();
                 }
-                end = System.currentTimeMillis();
-                System.out.println("Elapsed time: " + (end - start));
-
-
 
                 AyonixFace[] facess = faces.get(0);
                 System.out.println(facess.length);
@@ -665,6 +1041,79 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                 System.out.println("epic fail.");
             }
 
+        }
+    }
+
+    private void mainMode(Bitmap bitmap, int width, int height, AyonixFaceTracker faceTracker){
+        byte[] gray;
+        int pixels[];
+        long start;
+        long end;
+        AyonixImage frame;
+        try {
+            start = System.currentTimeMillis();
+            pixels = new int[bitmap.getWidth() * bitmap.getHeight()];
+            gray = new byte[width * height];
+
+            bitmap = rotateImage(bitmap);
+            bitmap.getPixels(pixels, 0, height, 0, 0, height, width);
+
+            for (int i = 0; i < pixels.length; i++) {
+                //gray[i] = (byte) (255 * Color.luminance(pixels[i]));
+                gray[i] = (byte) pixels[i];
+            }
+
+            frame = new AyonixImage(height, width, false, height, gray);
+            ArrayList<AyonixFace[]> faces = new ArrayList<>(1);
+            try {
+                AyonixFace[] capturedFaces = faceTracker.UpdateTracker(frame);
+                faces.add(capturedFaces);
+                                /*AyonixRect[] faceRects = engine.DetectFaces(frame, 5);
+                                faceArray = new AyonixFace[faceRects.length];
+
+                                for (int i = 0; i < faceArray.length; i++) {
+                                    faceArray[i] = engine.ExtractFaceFromRect(frame, faceRects[i]);
+                                    // only consider if face is above quality threshold
+                                    if (faceArray[i] != null && faceArray[i].quality >= QUALITY_THRESHOLD) {
+                                        Log.d(TAG3, "  Face[" + (i + 1) + "] " +
+                                                "       gender: " + (faceArray[i].gender > 0 ? "female" : "male") + "\n" +
+                                                "       age: " + (int) faceArray[i].age + "y\n" +
+                                                "       smile: " + faceArray[i].expression.smile + "\n" +
+                                                "       mouth open: " + faceArray[i].expression.mouthOpen + "\n" +
+                                                "       quality: " + faceArray[i].quality + "\n");
+                                    }
+                                }*/
+            } catch (AyonixException e) {
+                e.printStackTrace();
+            }
+
+            AyonixFace[] facess = faces.get(0);
+            System.out.println(facess.length);
+            for (int i = 0; i < faces.get(0).length; i++) {
+                if (faces.get(0)[i] != null) {
+                    String info = (
+                            "       " + (faces.get(0)[i].gender > 0 ? "female" : "male") + "\n" +
+                                    "       " + (int) faces.get(0)[i].age + "y\n" +
+                                    "       " + (faces.get(0)[i].expression.smile > 0.7 ? "smiling" : faces.get(0)[i].expression.smile < 0.7 ? "frowning" : "neutral") + "\n" +
+                                    "       mouth open: " + faces.get(0)[i].expression.mouthOpen + "\n" +
+                                    "       quality: " + faces.get(0)[i].quality * 100 + "\n");
+                    System.out.println(info);
+                }
+            }
+            for (AyonixFace face : faces.get(0)) {
+                String info = (
+                        "       " + (face.gender > 0 ? "female" : "male") + "\n" +
+                                "       " + (int) face.age + "y\n" +
+                                "       " + (face.expression.smile > 0.7 ? "smiling" : face.expression.smile < 0.7 ? "frowning" : "neutral") + "\n" +
+                                "       mouth open: " + face.expression.mouthOpen + "\n" +
+                                "       quality: " + face.quality * 100 + "\n");
+                System.out.println(info);
+            }
+            end = System.currentTimeMillis();
+            System.out.println("Elapsed time: " + (end - start));
+        } catch (Exception e) {
+            System.out.println(e.toString());
+            System.out.println("epic fail.");
         }
     }
 
@@ -713,7 +1162,8 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                                 height = image.getHeight();
 
                                 bitmap = YUV_420_888_toRGB(image, width, height);
-                                mBackgroundHandler.post(new SendImageData(bitmap,width,height,faceTracker));
+                                //mBackgroundHandler.post(new SendImageData(bitmap,width,height,faceTracker));
+                                mainMode(bitmap,width,height,faceTracker);
                                 image.close();
                             }
                             break;
@@ -740,84 +1190,31 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                                 Log.d(TAG3, "pixelated");
 
                                 start = System.currentTimeMillis();
-                                System.out.println("pixels length: " + pixels.length);
+                                Log.d(TAG3, "onImageAvailable: "+"pixels length: " + pixels.length);
                                 for (int i = 0; i < pixels.length; i++) {
                                     //gray[i] = (byte) (255 * Color.luminance(pixels[i]));
                                     gray[i] = (byte) pixels[i];
                                 }
                                 end = System.currentTimeMillis();
-                                System.out.println("Elapsed time: " + (end - start));
+                                System.out.println("Elapsed time to get byte array: " + (end - start));
 
                                 frame = new AyonixImage(height, width, false, height, gray);
-                                Log.d(TAG3, "got frame: " + frame);
-
                                 AyonixFace[] updatedFaces = faceTracker.UpdateTracker(frame);
                                 Log.d(TAG3, "updated face using tracker. " + Arrays.toString(updatedFaces));
                                 AyonixRect[] faceRects = engine.DetectFaces(frame, 5);
                                 faceArray = new AyonixFace[faceRects.length];
 
-                                Log.d(TAG3, "detecting faces...");
                                 bitmap.recycle();
-                                Log.d(TAG3, "recycled");
+                                Log.d(TAG3, "detecting faces...");
 
+                                // no faces were found
                                 if (faceRects.length <= 0) {
-                                    Log.d(TAG3, "Cannot detect faces.");
-                                    textView.append("Cannot detect faces. \n");
-                                    isTap = true;
-                                    runOnUiThread(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            cancelButton.show();
-                                        }
-                                    });
-                                    //recyclerView.setOnTouchListener(handleTouch);
-
-                                    textView.append("Tap two points (both eyes) to detect face, or cancel.\n");
-                                    while (((point1.x == 0.0 && point1.y == 0.0) || (point2.x == 0.0 && point2.y == 0.0)) && !cancel) {
-                                        // wait for user to pick 2 points or cancel
-                                    }
-                                    isTap = false;
-                                    if (cancel) {
-                                        cancel = false;
-                                        facesToShow.clear();
-                                        runOnUiThread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                mAdapter.notifyDataSetChanged();
-                                            }
-                                        });
+                                    faceNotDetected(faceArray, frame);
+                                    if(faceArray[0] == null) {
                                         mode = "main";
+                                        Log.d(TAG3, "onImageAvailable: leaving enrollment");
                                         updatePreview();
                                     }
-                                    if ((point1.x != 0.0 && point1.y != 0.0) && (point2.x != 0.0 && point2.y != 0.0)) {
-                                        try {
-                                            faceArray = new AyonixFace[1];
-                                            faceArray[0] = engine.ExtractFaceFromPts(frame, point1, point2);
-                                            gotFace = true;
-                                        } catch (AyonixException e1) {
-                                            e1.printStackTrace();
-                                        }
-                                        if (faceArray[0] == null) {
-                                            //recyclerView.setOnTouchListener(null);
-                                            runOnUiThread(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    enrollButton.setVisibility(View.VISIBLE);
-                                                    matchButton.setVisibility(View.VISIBLE);
-                                                    cancelButton.hide();
-                                                }
-                                            });
-                                            mode = "main";
-                                            updatePreview();
-                                        }
-                                    }
-                                    //recyclerView.setOnTouchListener(null);
-                                    runOnUiThread(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            cancelButton.hide();
-                                        }
-                                    });
                                 }
 
                                 int totalSize = 0;
@@ -858,22 +1255,18 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                                                 });
 
                                                 Log.d(TAG3, "view is visible");
-                                                while (enroll && !cancel) {
-                                                    if (cancel) {
-                                                        cancel = false;
-                                                        mode = "main";
-                                                        updatePreview();
-                                                    }
+                                                while (enroll) {
                                                     /* wait until user confirms enrollment */
                                                 }
+                                                Log.d(TAG3, "enroll = " + enroll);
                                                 enroll = true;
+
                                                 Log.d(TAG3, "Creating AFID");
                                                 afidi = engine.CreateAfid(mAdapter.getSelected());
 
-                                                if (!create) {
+                                                if (merging) {
                                                     Log.d(TAG3, "Merging AFIDs...");
-                                                    merging = true;
-                                                    afidi = engine.MergeAfids(afidi, mAdapter.matchAfid);
+                                                    afidi = engine.MergeAfids(afidi, mAdapter.getMatchAfid());
                                                 }
 
                                                 Log.d(TAG3, "enrolling..");
@@ -890,7 +1283,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                                                     }
                                                 });
                                                 image.close();
-                                                textView.setText(null);
+                                                Log.d(TAG3, "onImageAvailable: leaving enrollment");
                                                 updatePreview();
                                             }
                                         }
@@ -906,16 +1299,15 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                                 if (image != null) {
                                     image.close();
                                 }
-                                textView.setText(null);
                                 runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
+                                        Log.d(TAG3, "run: enrollment failed");
                                         enrollButton.setVisibility(View.VISIBLE);
                                         matchButton.setVisibility(View.VISIBLE);
                                     }
                                 });
                                 facesToShow.clear();
-                                Log.d(TAG3, "why am i here?");
                             }
                             break;
 
@@ -961,6 +1353,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                                 Log.d(TAG3, "got faces");
                                 bitmap.recycle();
 
+                                // no faces were found
                                 if (faceRects.length <= 0) {
                                     textView.append("Cannot detect faces. \n");
                                     runOnUiThread(new Runnable() {
@@ -983,15 +1376,11 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                                         }
                                     });*/
                                     textView.append("Tap two points (both eyes) to detect face, or cancel.\n");
-                                    while (((point1.x == 0.0 && point1.y == 0.0) || (point2.x == 0.0 && point2.y == 0.0)) && !cancel) {
+                                    while ((point1.x == 0.0 && point1.y == 0.0) || (point2.x == 0.0 && point2.y == 0.0)){
                                         // wait for user to pick 2 points or cancel
                                     }
                                     Log.d(TAG3, "broke loop");
-                                    if(cancel) {
-                                        cancel = false;
-                                        mode = "main";
-                                        updatePreview();
-                                    }
+
                                     if((point1.x != 0.0 && point1.y != 0.0) && (point2.x != 0.0 && point2.y != 0.0)){
                                         try {
                                             faceArray = new AyonixFace[1];
@@ -1002,9 +1391,11 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                                         }
                                         if(faceArray[0] == null) {
                                             //recyclerView.setOnTouchListener(null);
+                                            textView.append("no faces found :(\n");
                                             runOnUiThread(new Runnable() {
                                                 @Override
                                                 public void run() {
+                                                    Log.d(TAG3, "run: chosen points failed during match");
                                                     enrollButton.setVisibility(View.VISIBLE);
                                                     matchButton.setVisibility(View.VISIBLE);
                                                     cancelButton.hide();
@@ -1079,6 +1470,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                 }
                 private void save(byte[] afid, AyonixFace face) {
                     if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+                        ArrayList<File> files = new ArrayList<>();
                         try {
                             File jpegFile = new File(imageFolder, "/"+System.currentTimeMillis() + ".jpg");
                             FileOutputStream out = new FileOutputStream(jpegFile);
@@ -1087,15 +1479,16 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                             out.flush();
                             out.close();
 
-                            ArrayList<File> files = new ArrayList<>();
                             // add image to already existing image list
                             if(merging){
                                 files = masterList.get(mAdapter.getMatchAfid());
+                                masterList.remove(mAdapter.getMatchAfid());
                                 mAdapter.checkedPosition = -1;
                                 merging = false;
+                                files.add(0, jpegFile);
                             }
-                            files.add(jpegFile);
-                            //master.put(afid, files);
+                            else
+                                files.add(jpegFile);
                             masterList.put(afid, files);
                             runOnUiThread(new Runnable() {
                                 @Override
@@ -1109,7 +1502,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                             outputStream.flush();
                             outputStream.close();
                             Log.d(TAG3, "saved successful.");
-                            Toast.makeText(MainActivity.this, "Enrolled.", Toast.LENGTH_LONG).show();
+                            Toast.makeText(getBaseContext(), "Enrolled.", Toast.LENGTH_LONG).show();
                         } catch (IOException e) {
                             e.printStackTrace();
                         }
@@ -1964,6 +2357,7 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
     public static Bitmap rotateBitmap(Bitmap source, float angle) {
         Matrix matrix = new Matrix();
         matrix.postRotate(angle);
+        matrix.postScale(-1, 1, source.getWidth()/2f, source.getHeight()/2f);
         return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
     }
 
