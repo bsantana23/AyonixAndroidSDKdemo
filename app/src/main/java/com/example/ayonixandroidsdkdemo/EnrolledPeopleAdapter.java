@@ -5,6 +5,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.support.annotation.NonNull;
+import android.support.v7.widget.DividerItemDecoration;
+import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -19,31 +21,36 @@ import java.util.Set;
 
 public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAdapter.MyViewHolder> {
     private Context context;
-    private HashMap<byte[], ArrayList<File>> enrolledPeople;
+    private ArrayList<File> enrolledPeople;
     protected int checkedPosition = -1;
     private final String TAG = "enrolledPeopleAdapter";
     private Set afidSet;
-    private List<byte[]> afidList;
+    private List<byte[]> afidList = new ArrayList<>();
+    private RecyclerView multiFacesRecyclerView;
+    private MyMultiFaceListRecyclerViewAdapter multiFaceAdapter;
 
-    public EnrolledPeopleAdapter(HashMap<byte[], ArrayList<File>> myDataset, Context context) {
+    public EnrolledPeopleAdapter(ArrayList<File> myDataset, Context context) {
         enrolledPeople = myDataset;
         this.context = context;
     }
 
-    public void setFacesToEnroll(HashMap<byte[], ArrayList<File>> enrolled) {
-        this.enrolledPeople = new HashMap<>();
+    public void setFacesToEnroll(ArrayList<File> enrolled) {
+        this.enrolledPeople = new ArrayList<>();
         this.enrolledPeople = enrolled;
-        if(!enrolled.isEmpty()){
-            afidSet = enrolledPeople.keySet();
-            afidList = new ArrayList<>(afidSet);
-        }
     }
 
     @NonNull
     @Override
     public EnrolledPeopleAdapter.MyViewHolder onCreateViewHolder(@NonNull ViewGroup viewGroup, int i) {
-        android.view.View v =  LayoutInflater.from(context).inflate(R.layout.recycle_view_item, viewGroup, false);
+        android.view.View v =  LayoutInflater.from(context).inflate(R.layout.fragment_multifacelist, viewGroup, false);
         Log.d(TAG, "creating create view holder");
+       /* multiFacesRecyclerView = viewGroup.findViewById(R.id.multiImages);
+        multiFacesRecyclerView.setHasFixedSize(true);
+        multiFacesRecyclerView.addItemDecoration(new DividerItemDecoration(context, LinearLayoutManager.HORIZONTAL));
+        multiFacesRecyclerView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, false));
+        multiFaceAdapter = new MyMultiFaceListRecyclerViewAdapter(new ArrayList<File>(), null, context);
+        multiFacesRecyclerView.setAdapter(multiFaceAdapter);
+        multiFacesRecyclerView.setVisibility(View.INVISIBLE);*/
         return new MyViewHolder(v);
     }
 
@@ -55,13 +62,7 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
         else
             viewHolder.itemView.setBackgroundColor(Color.parseColor("#A8D9F8"));
         System.out.println("getting afid index " + index);
-        ArrayList<File> fileArrayList = new ArrayList<>();
-        if(!afidList.isEmpty() && index < afidList.size()){
-            byte[] afid = afidList.get(index);
-            if(index < afidList.size())
-                fileArrayList = enrolledPeople.get(afid);
-        }
-        viewHolder.bind(fileArrayList);
+        viewHolder.bind(enrolledPeople.get(index));
     }
 
     @Override
@@ -78,7 +79,7 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
 
         public MyViewHolder(View v) {
             super(v);
-            mugshot = v.findViewById(R.id.mugshot);
+            mugshot = v.findViewById(R.id.multimugshot);
             check = v.findViewById(R.id.checkbox);
             ViewGroup.LayoutParams params = check.getLayoutParams();
             params.width = 80;
@@ -86,9 +87,9 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
             check.setLayoutParams(params);
         }
 
-        void bind(final ArrayList<File> jpegFiles) {
+        void bind(final File jpegFile) {
             Log.d(TAG, "binding..");
-            if(null != jpegFiles) {
+            if(null != jpegFile) {
 
                 // toggle check mark
                 if (checkedPosition == -1) {
@@ -101,11 +102,10 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
                     }
                 }
 
-                if(!jpegFiles.isEmpty()) {
-                    Bitmap bm = BitmapFactory.decodeFile(jpegFiles.get(0).getAbsolutePath());
-                    mugshot.setImageBitmap(bm);
-                    mugshot.setVisibility(View.VISIBLE);
-                }
+                Bitmap bm = BitmapFactory.decodeFile(jpegFile.getAbsolutePath());
+                mugshot.setImageBitmap(bm);
+                mugshot.setVisibility(View.VISIBLE);
+
 
                 // allows toggling of check mark
                 itemView.setOnClickListener(new View.OnClickListener() {

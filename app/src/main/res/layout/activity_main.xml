@@ -22,5 +22,6 @@
 
     <include layout="@layout/content_main" />
     <include layout="@layout/recycle_view_item" />
+    <include layout="@layout/fragment_multifacelist" />
 
 </android.support.design.widget.CoordinatorLayout>
