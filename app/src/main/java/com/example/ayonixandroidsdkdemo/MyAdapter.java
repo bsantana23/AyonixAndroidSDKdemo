@@ -40,6 +40,7 @@ public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
         this.masterList = master;
         this.engine = engine;
         this.context = context;
+        confirmButtonOff = true;
     }
 
     public void setFacesToEnroll(Vector<AyonixFace> facesToEnroll, int length) {
