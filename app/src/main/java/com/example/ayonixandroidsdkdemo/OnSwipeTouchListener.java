@@ -1,11 +1,92 @@
 package com.example.ayonixandroidsdkdemo;
 
+import android.content.Context;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
-import android.widget.Toast;
+import android.view.View;
 
-public class OnSwipeListener extends GestureDetector.SimpleOnGestureListener {
+import static android.support.constraint.Constraints.TAG;
+
+public class OnSwipeTouchListener implements View.OnTouchListener {
+
+    private GestureDetector gestureDetector;
+    private MainActivity context;
+
+    public OnSwipeTouchListener(Context c) {
+        gestureDetector = new GestureDetector(c, new GestureListener());
+        context = (MainActivity) c;
+    }
+
+    public boolean onTouch(final View view, final MotionEvent motionEvent) {
+        return gestureDetector.onTouchEvent(motionEvent);
+    }
+
+    private final class GestureListener extends GestureDetector.SimpleOnGestureListener {
+
+        private static final int SWIPE_THRESHOLD = 100;
+        private static final int SWIPE_VELOCITY_THRESHOLD = 100;
+
+        @Override
+        public boolean onDown(MotionEvent e) {
+            return true;
+        }
+
+        // Determines the fling velocity and then fires the appropriate swipe event accordingly
+        @Override
+        public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+            boolean result = false;
+            try {
+                float diffY = e2.getY() - e1.getY();
+                float diffX = e2.getX() - e1.getX();
+                if (Math.abs(diffX) > Math.abs(diffY)) {
+                    if (Math.abs(diffX) > SWIPE_THRESHOLD && Math.abs(velocityX) > SWIPE_VELOCITY_THRESHOLD) {
+                        if (diffX > 0) {
+                            onSwipeRight();
+                        } else {
+                            onSwipeLeft();
+                        }
+                    }
+                } else {
+                    if (Math.abs(diffY) > SWIPE_THRESHOLD && Math.abs(velocityY) > SWIPE_VELOCITY_THRESHOLD) {
+                        if (diffY > 0) {
+                            onSwipeDown();
+                        } else {
+                            onSwipeUp();
+                        }
+                    }
+                }
+            } catch (Exception exception) {
+                exception.printStackTrace();
+            }
+            return result;
+        }
+
+            // Invoked when single tap screen.
+            @Override
+            public boolean onSingleTapConfirmed(MotionEvent e) {
+                Log.d(TAG, "Single tap occurred.");
+                return false;
+            }
+
+            // Invoked when double tap screen.
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                Log.d(TAG, "Double tap occurred.");
+                return true;
+            }
+}
+
+    public void onSwipeRight() { }
+
+    public void onSwipeLeft() { }
+
+    public void onSwipeUp() { }
+
+    public void onSwipeDown() { }
+}
+//-----------------------------------------------------------------------------------------------------
+/*public class OnSwipeListener extends GestureDetector.SimpleOnGestureListener {
 
     // Minimal x and y axis swipe distance.
     private static int MIN_SWIPE_DISTANCE_X = 100;
@@ -28,7 +109,7 @@ public class OnSwipeListener extends GestureDetector.SimpleOnGestureListener {
         this.activity = activity;
     }
 
-    /* This method is invoked when a swipe gesture happened. */
+    *//* This method is invoked when a swipe gesture happened. *//*
     @Override
     public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
 
@@ -78,8 +159,7 @@ public class OnSwipeListener extends GestureDetector.SimpleOnGestureListener {
         Log.d(TAG, "Double tap occurred.");
         return true;
     }
-}
-//-----------------------------------------------------------------------------------------
+}*/
 //-----------------------------------------------------------------------------------------------------
 /*package com.example.ayonixandroidsdkdemo;
 

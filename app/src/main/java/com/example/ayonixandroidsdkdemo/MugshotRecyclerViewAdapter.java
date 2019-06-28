@@ -4,17 +4,11 @@ import android.support.v7.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.TextView;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.support.annotation.NonNull;
-import android.support.v7.widget.RecyclerView;
 import android.util.Log;
-import android.view.LayoutInflater;
-import android.view.View;
-import android.view.ViewGroup;
 import android.widget.ImageView;
 import java.io.File;
 import java.util.ArrayList;
@@ -22,24 +16,19 @@ import java.util.ArrayList;
 import com.example.ayonixandroidsdkdemo.MultiFaceListFragment.OnListFragmentInteractionListener;
 import com.example.ayonixandroidsdkdemo.dummy.DummyContent.DummyItem;
 
-import java.util.List;
-
 /**
  * {@link RecyclerView.Adapter} that can display a {@link DummyItem} and makes a call to the
  * specified {@link OnListFragmentInteractionListener}.
  * TODO: Replace the implementation with code for your data type.
  */
-public class MyMultiFaceListRecyclerViewAdapter extends RecyclerView.Adapter<MyMultiFaceListRecyclerViewAdapter.ViewHolder> {
+public class MugshotRecyclerViewAdapter extends RecyclerView.Adapter<MugshotRecyclerViewAdapter.ViewHolder> {
 
     private ArrayList<File> mValues;
-    private final OnListFragmentInteractionListener mListener;
     private Context context;
-    protected int checkedPosition = -1;
     private final String TAG = "MyMultiFaceListAdapter";
 
-    public MyMultiFaceListRecyclerViewAdapter(ArrayList<File> items, OnListFragmentInteractionListener listener, Context c) {
+    public MugshotRecyclerViewAdapter(ArrayList<File> items, Context c) {
         mValues = items;
-        mListener = listener;
         context = c;
     }
 
@@ -58,18 +47,11 @@ public class MyMultiFaceListRecyclerViewAdapter extends RecyclerView.Adapter<MyM
 
     @Override
     public void onBindViewHolder(final ViewHolder holder, int position) {
+        if(position%2 == 1)
+            holder.itemView.setBackgroundColor(Color.parseColor("#6AB8EE"));
+        else
+            holder.itemView.setBackgroundColor(Color.parseColor("#A8D9F8"));
         holder.mItem = mValues.get(position);
-
-        holder.mView.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (null != mListener) {
-                    // Notify the active callbacks interface (the activity, if the
-                    // fragment is attached to one) that an item has been selected.
-                    //mListener.onListFragmentInteraction(holder.mItem);
-                }
-            }
-        });
         holder.bind(mValues.get(position));
     }
 
@@ -97,6 +79,5 @@ public class MyMultiFaceListRecyclerViewAdapter extends RecyclerView.Adapter<MyM
                 mugshot.setVisibility(View.VISIBLE);
             }
         }
-
     }
 }

@@ -15,6 +15,7 @@ import com.example.ayonixandroidsdkdemo.dummy.DummyContent.DummyItem;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 
 /**
  * A fragment representing a list of Items.
@@ -70,7 +71,7 @@ public class MultiFaceListFragment extends Fragment {
             } else {
                 recyclerView.setLayoutManager(new GridLayoutManager(context, mColumnCount));
             }
-            recyclerView.setAdapter(new EnrolledPeopleAdapter(new ArrayList<File>(), context));
+            recyclerView.setAdapter(new EnrolledPeopleAdapter(new HashMap<byte[], EnrolledInfo>(), context));
         }
         return view;
     }

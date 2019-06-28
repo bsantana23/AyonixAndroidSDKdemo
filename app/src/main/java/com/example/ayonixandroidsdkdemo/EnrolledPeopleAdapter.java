@@ -1,12 +1,12 @@
 package com.example.ayonixandroidsdkdemo;
 
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.support.annotation.NonNull;
-import android.support.v7.widget.DividerItemDecoration;
-import android.support.v7.widget.LinearLayoutManager;
+import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -16,26 +16,26 @@ import android.widget.ImageView;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
-import java.util.Set;
+import java.util.Vector;
 
 public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAdapter.MyViewHolder> {
     private Context context;
-    private ArrayList<File> enrolledPeople;
+    private HashMap<byte[], EnrolledInfo> enrolledPeople;
+    private RecyclerView mugshotView;
     protected int checkedPosition = -1;
     private final String TAG = "enrolledPeopleAdapter";
-    private Set afidSet;
-    private List<byte[]> afidList = new ArrayList<>();
-    private RecyclerView multiFacesRecyclerView;
-    private MyMultiFaceListRecyclerViewAdapter multiFaceAdapter;
+    private int index;
+    private Vector<byte[]> afidList;
+    private MugshotRecyclerViewAdapter mugshotRecyclerViewAdapter;
 
-    public EnrolledPeopleAdapter(ArrayList<File> myDataset, Context context) {
+    public EnrolledPeopleAdapter(HashMap<byte[], EnrolledInfo> myDataset, Context context) {
         enrolledPeople = myDataset;
         this.context = context;
+        afidList = new Vector<>(myDataset.keySet());
+        mugshotRecyclerViewAdapter = new MugshotRecyclerViewAdapter(new ArrayList<File>(), context);
     }
 
-    public void setFacesToEnroll(ArrayList<File> enrolled) {
-        this.enrolledPeople = new ArrayList<>();
+    public void setFacesToEnroll(HashMap<byte[], EnrolledInfo> enrolled) {
         this.enrolledPeople = enrolled;
     }
 
@@ -44,13 +44,6 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
     public EnrolledPeopleAdapter.MyViewHolder onCreateViewHolder(@NonNull ViewGroup viewGroup, int i) {
         android.view.View v =  LayoutInflater.from(context).inflate(R.layout.fragment_multifacelist, viewGroup, false);
         Log.d(TAG, "creating create view holder");
-       /* multiFacesRecyclerView = viewGroup.findViewById(R.id.multiImages);
-        multiFacesRecyclerView.setHasFixedSize(true);
-        multiFacesRecyclerView.addItemDecoration(new DividerItemDecoration(context, LinearLayoutManager.HORIZONTAL));
-        multiFacesRecyclerView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, false));
-        multiFaceAdapter = new MyMultiFaceListRecyclerViewAdapter(new ArrayList<File>(), null, context);
-        multiFacesRecyclerView.setAdapter(multiFaceAdapter);
-        multiFacesRecyclerView.setVisibility(View.INVISIBLE);*/
         return new MyViewHolder(v);
     }
 
@@ -62,7 +55,8 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
         else
             viewHolder.itemView.setBackgroundColor(Color.parseColor("#A8D9F8"));
         System.out.println("getting afid index " + index);
-        viewHolder.bind(enrolledPeople.get(index));
+        if(afidList.size() > index)
+            viewHolder.bind(enrolledPeople.get(afidList.get(index)));
     }
 
     @Override
@@ -87,9 +81,9 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
             check.setLayoutParams(params);
         }
 
-        void bind(final File jpegFile) {
+        void bind(final EnrolledInfo info) {
             Log.d(TAG, "binding..");
-            if(null != jpegFile) {
+            if(null != info) {
 
                 // toggle check mark
                 if (checkedPosition == -1) {
@@ -102,10 +96,8 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
                     }
                 }
 
-                Bitmap bm = BitmapFactory.decodeFile(jpegFile.getAbsolutePath());
-                mugshot.setImageBitmap(bm);
-                mugshot.setVisibility(View.VISIBLE);
-
+                mugshotRecyclerViewAdapter.setImagesToShow(info.getMugshots());
+                mugshotRecyclerViewAdapter.notifyDataSetChanged();
 
                 // allows toggling of check mark
                 itemView.setOnClickListener(new View.OnClickListener() {
@@ -117,6 +109,10 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
                             notifyItemChanged(checkedPosition);
                             checkedPosition = getAdapterPosition();
                         }
+                        Intent remove = new Intent("removeSelected");
+                        remove.setAction("removeSelected");
+                        boolean sent = LocalBroadcastManager.getInstance(context).sendBroadcast(remove);
+                        Log.d(TAG, "toggle confirm/cancel buttons intent sent " + sent);
                     }
                 });
             }

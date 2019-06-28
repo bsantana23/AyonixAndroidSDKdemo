@@ -28,14 +28,14 @@ import ayonix.AyonixFaceID;
 public class MyAdapter extends RecyclerView.Adapter<MyAdapter.MyViewHolder> {
     private Context context;
     private Vector<AyonixFace> facesToEnroll;
-    private HashMap<byte[],  ArrayList<File>> masterList;
+    private HashMap<byte[], EnrolledInfo> masterList;
     private AyonixFaceID engine;
     protected int checkedPosition = -1;
     protected boolean confirmButtonOff = true;
     private final String TAG = "myAdapter";
     protected byte[] matchAfid;
 
-    public MyAdapter(Vector<AyonixFace> myDataset, HashMap<byte[], ArrayList<File>> master, AyonixFaceID engine, Context context) {
+    public MyAdapter(Vector<AyonixFace> myDataset, HashMap<byte[], EnrolledInfo> master, AyonixFaceID engine, Context context) {
         this.facesToEnroll = myDataset;
         this.masterList = master;
         this.engine = engine;
