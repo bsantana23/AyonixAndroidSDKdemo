@@ -27,9 +27,8 @@ public class MugshotRecyclerViewAdapter extends RecyclerView.Adapter<MugshotRecy
     private Context context;
     private final String TAG = "MyMultiFaceListAdapter";
 
-    public MugshotRecyclerViewAdapter(ArrayList<File> items, Context c) {
-        mValues = items;
-        context = c;
+    public MugshotRecyclerViewAdapter(ArrayList<File> info) {
+        mValues = info;
     }
 
     public void setImagesToShow(ArrayList<File> images) {
@@ -60,6 +59,17 @@ public class MugshotRecyclerViewAdapter extends RecyclerView.Adapter<MugshotRecy
         return mValues.size();
     }
 
+    @Override
+    public long getItemId(int position) {
+        return position;
+    }
+
+    @Override
+    public int getItemViewType(int position) {
+        return position;
+    }
+
+
     public class ViewHolder extends RecyclerView.ViewHolder {
         public final View mView;
         public File mItem;
@@ -75,6 +85,7 @@ public class MugshotRecyclerViewAdapter extends RecyclerView.Adapter<MugshotRecy
             Log.d(TAG, "binding..");
             if(null != jpegFile) {
                 Bitmap bm = BitmapFactory.decodeFile(jpegFile.getAbsolutePath());
+                bm = MainActivity.scaleDown(bm, 350, true);
                 mugshot.setImageBitmap(bm);
                 mugshot.setVisibility(View.VISIBLE);
             }

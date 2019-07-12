@@ -8,7 +8,7 @@ import android.view.View;
 
 import static android.support.constraint.Constraints.TAG;
 
-public class OnSwipeTouchListener implements View.OnTouchListener {
+public abstract class OnSwipeTouchListener implements View.OnTouchListener {
 
     private GestureDetector gestureDetector;
     private MainActivity context;
@@ -65,8 +65,7 @@ public class OnSwipeTouchListener implements View.OnTouchListener {
             // Invoked when single tap screen.
             @Override
             public boolean onSingleTapConfirmed(MotionEvent e) {
-                Log.d(TAG, "Single tap occurred.");
-                return false;
+                return onSingleTap(e);
             }
 
             // Invoked when double tap screen.
@@ -84,6 +83,8 @@ public class OnSwipeTouchListener implements View.OnTouchListener {
     public void onSwipeUp() { }
 
     public void onSwipeDown() { }
+
+    public boolean onSingleTap(MotionEvent e) { return false; }
 }
 //-----------------------------------------------------------------------------------------------------
 /*public class OnSwipeListener extends GestureDetector.SimpleOnGestureListener {

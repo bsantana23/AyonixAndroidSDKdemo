@@ -24,6 +24,9 @@
         android:required="false" />
     <uses-feature android:name="android.hardware.camera"
         android:required="true" />
+    <uses-feature android:glEsVersion="0x00020000"
+        android:required="true" />
+
 
 
     <application
@@ -44,7 +47,6 @@
             android:theme="@style/AppTheme.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
