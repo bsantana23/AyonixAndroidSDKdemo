@@ -11,24 +11,19 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
-import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
-import android.media.CamcorderProfile;
 import android.media.ExifInterface;
 import android.media.Image;
 import android.media.ImageReader;
-import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.IBinder;
-import android.preference.PreferenceManager;
 import android.support.v4.app.*;
 import android.support.v4.content.LocalBroadcastManager;
 import android.support.v8.renderscript.Allocation;
@@ -39,20 +34,20 @@ import android.support.v8.renderscript.Type;
 import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
-import android.view.TextureView;
-import android.view.View;
-import android.view.WindowManager;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ObjectInputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -63,32 +58,28 @@ import ayonix.AyonixFace;
 import ayonix.AyonixFaceID;
 import ayonix.AyonixFaceTracker;
 import ayonix.AyonixImage;
-import ayonix.AyonixLicenseStatus;
-import ayonix.AyonixRect;
 
 import static android.content.ContentValues.TAG;
-import static android.graphics.ImageFormat.RGB_565;
-import static android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO;
 
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
-import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
-import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
-import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 import com.xxxyyy.testcamera2.ScriptC_yuv420888;
+
+import org.opencv.android.OpenCVLoader;
+import org.opencv.android.Utils;
+import org.opencv.core.CvType;
+import org.opencv.core.Mat;
+import org.opencv.imgproc.Imgproc;
 
 public class AyonixUnlockService extends Service {
 
     private AyonixFaceID engine = null;
     private AyonixFaceTracker faceTracker = null;
-    private ImageReader.OnImageAvailableListener mOnImageAvailableListener = null;
     private static final String TAG_FOREGROUND_SERVICE = "FOREGROUND_SERVICE";
     public static final String ACTION_START_FOREGROUND_SERVICE = "ACTION_START_FOREGROUND_SERVICE";
     public static final String ACTION_STOP_FOREGROUND_SERVICE = "ACTION_STOP_FOREGROUND_SERVICE";
@@ -96,27 +87,158 @@ public class AyonixUnlockService extends Service {
     public static final String ACTION_PLAY = "ACTION_PLAY";
 
     //Let client decide what minimum match percentage is
-    private final int minMatch = 90;
-    private final int detectionPeriod = 5;
-    private final int minFaceSize = 40;
-    private final int maxFaceSize = 300;
-    private final float qualityThreshold = 0.6f;
+    private final int MINMATCH = 90;
+    private final int DETECTIONPERIOD = 5;
+    private final int MINFACESIZE = 40;
+    private final int MAXFACESIZE = 300;
+    private final float QUALITYTHRESHOLD = 0.6f;
+    private final int MAXIMAGES = 2;
+    private static final int MAXPIXELS = 1000000;
     private int width;
     private int height;
     protected Vector<byte[]> afidVec = null;
-    protected String json = null;
-    protected Gson gson = null;
-    protected SharedPreferences sharedPrefs = null;
-    protected SharedPreferences.Editor prefsEditor = null;
     private ImageReader imageReader = null;
     protected CameraDevice cameraDevice;
     protected CaptureRequest.Builder captureRequestBuilder;
     private String cameraId;
     private Size imageDimension;
 
+    private Context context;
+
+    private HashMap<byte[], EnrolledInfo> masterList = null;
+
+    /**
+     * Temporary list to hold onto newly created afids used to match for match list.
+     */
+    private Vector<byte[]> afidList = new Vector<>();
+    private Vector<Bitmap> bitmapsToMatch = new Vector<>();
+    private Vector<AyonixFace> facesToMatch = new Vector<>();
+    private static String afidFile = null;
+    private String filesDir = null;
+    private File afidFolder = null;
+    private File imageFolder = null;
+
     private static final String TAG2 = "GetMyAFIDs";
+    private CameraCaptureSession cameraCaptureSession;
+    private Timer timer;
+    private LinkedHashMap<Bitmap, EnrolledInfo> matchList  = new LinkedHashMap<>();
 
     public AyonixUnlockService() { super(); }
+
+    ImageReader.OnImageAvailableListener mOnImageAvailableListener = new ImageReader.OnImageAvailableListener() {
+        @Override
+        public void onImageAvailable(ImageReader reader) {
+            Image image = reader.acquireLatestImage();
+            Log.d("faceService", "image available from recording");
+            if (image != null) {
+                try {
+                    int width = image.getWidth();
+                    int height = image.getHeight();
+
+                    Bitmap bitmap = YUV_420_888_toRGB(image, width, height);
+                    int pixels[] = new int[bitmap.getWidth() * bitmap.getHeight()];
+                    byte gray[] = new byte[bitmap.getWidth() * bitmap.getHeight()];
+                    image.close();
+
+                    bitmap = rotateImage(bitmap);
+                    Mat tmp = new Mat(width, height, CvType.CV_8UC1);
+                    Utils.bitmapToMat(bitmap, tmp);
+                    Imgproc.cvtColor(tmp, tmp, Imgproc.COLOR_RGB2GRAY);
+                    //there could be some processing
+                    Imgproc.cvtColor(tmp, tmp, Imgproc.COLOR_GRAY2RGB, 4);
+                    Utils.matToBitmap(tmp, bitmap);
+                    bitmap.getPixels(pixels, 0, bitmap.getWidth(),
+                            0, 0, bitmap.getWidth(), bitmap.getHeight());
+
+                    for (int i = 0; i < pixels.length; i++) {
+                        gray[i] = (byte) pixels[i];
+                    }
+
+                    AyonixImage frame = new AyonixImage(height, width, false, height, gray);
+
+                    AyonixFace[] updatedfaces = faceTracker.UpdateTracker(frame);
+                    for (AyonixFace face : updatedfaces) {
+                        Log.d(TAG, "onImageAvailable: found faces");
+                        if (face != null) {
+                            if ((int) face.roll < -20 || (int) face.roll > 20) {
+                                Log.d(TAG, "onImageAvailable: keep head straight");
+
+                            } else if ((int) face.yaw < -13 || (int) face.yaw > 13) {
+                                Log.d(TAG, "onImageAvailable: face straight");
+
+                            } else {
+                                final Vector<byte[]> afids = new Vector<>(masterList.keySet());
+                                float[] scores = new float[afids.size()];
+                                try {
+                                    String info = (
+                                            "Face[" + (face.trackerCount) + "] : \n" +
+                                                    "       " + (face.gender > 0 ? "female" : "male") + "\n" +
+                                                    "       " + (int) face.age + "y\n" +
+                                                    "       " + (face.expression.smile > 0.1 ? "smiling" : "no smile") + "\n" + //face.expression.smile < -0.9 ? "frowning" : "neutral") + "\n" +
+                                                    "       mouth open: " + Math.round(face.expression.mouthOpen * 100) + "%" + "\n" +
+                                                    "       quality: " + Math.round(face.quality * 100) + "%" + "\n" +
+                                                    "       roll: " + (int) (face.roll) + "\n" +
+                                                    "       pitch: " + (int) (face.pitch) + "\n" +
+                                                    "       yaw: " + (int) (face.yaw) + "\n" +
+                                                    "       location x:" + face.location.x + ", y:" + face.location.y + ", w:" + face.location.w + " , h:" + face.location.h + "\n" +
+                                                    "       muglocation x:" + face.mugLocation.x + ", y:" + face.mugLocation.y + ", w:" + face.mugLocation.w + " , h:" + face.mugLocation.h + "\n\n");
+                                    System.out.println(info);
+                                    byte[] afid = engine.CreateAfid(face);
+                                    engine.MatchAfids(afid, afids, scores);
+                                    for (int j = 0; j < scores.length; j++) {
+                                        if (scores[j] * 100 >= MINMATCH) {
+                                            Log.d(TAG, "onImageAvailable: unlocking!!");
+                                            sendBroadcast(true);
+                                            closeCamera();
+                                        }
+                                    }
+                                } catch (AyonixException e) {
+                                    e.printStackTrace();
+                                }
+                            }
+                        }
+                    }
+                } catch (AyonixException e) {
+                    e.printStackTrace();
+                } finally {
+                    image.close();
+                }
+            }
+        }
+    };
+
+    public int onStartCommand(Intent intent, int flags, int startId){
+        if(intent != null)
+        {
+            String action = intent.getAction();
+            Log.d("faceService", "Switching action");
+            switch (action)
+            {
+                case ACTION_START_FOREGROUND_SERVICE:
+                    Log.d("faceService", "starting foreground service");
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                        startForegroundService();
+                    else
+                        startForeground(1, new Notification());
+                    Toast.makeText(getApplicationContext(), "Foreground service is started.", Toast.LENGTH_LONG).show();
+                    break;
+                case ACTION_STOP_FOREGROUND_SERVICE:
+                    stopForegroundService();
+                    Toast.makeText(getApplicationContext(), "Foreground service is stopped.", Toast.LENGTH_LONG).show();
+                    break;
+                case ACTION_PLAY:
+                    Toast.makeText(getApplicationContext(), "You click Play button.", Toast.LENGTH_LONG).show();
+                    break;
+                default:
+                    Toast.makeText(getApplicationContext(), "Something went wrong starting service", Toast.LENGTH_LONG).show();
+                    break;
+            }
+        }
+        return super.onStartCommand(intent, flags, startId);
+
+        /*super.onStartCommand(intent, flags, startId);
+        return START_STICKY;*/
+    }
 
     @Override
     public IBinder onBind(Intent intent) { return null; }
@@ -127,23 +249,23 @@ public class AyonixUnlockService extends Service {
 
         Log.d("faceService", "received");
 
-        afidVec = new Vector<>();
+        OpenCVLoader.initDebug();
 
-        sharedPrefs = PreferenceManager.getDefaultSharedPreferences(AyonixUnlockService.this);
-        prefsEditor = sharedPrefs.edit();
-        gson = new Gson();
-        json = sharedPrefs.getString(TAG2, null); //try "" instead of null ???
-        //Retrieve previously saved data
-        if (json != null) {
-            java.lang.reflect.Type type = new TypeToken<Vector<byte[]>>() {}.getType();
-            afidVec = gson.fromJson(json, type);
-        }
+        filesDir = getFilesDir().toString();
+        afidFolder = new File(filesDir + "/afids");
+        afidFolder.mkdirs();
+        afidFile = afidFolder.toString() + "/afidlist";
+        imageFolder = new File(filesDir + "/images");
+        imageFolder.mkdirs();
+        setMasterList();
 
         // receive screen on/off broadcasts
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_SCREEN_ON);
         filter.addAction(Intent.ACTION_SCREEN_OFF);
         registerReceiver(receive, filter);
+
+        openCamera();
 
         // step 1. list assets (and make sure engine and test image are there)
         String engineAssetFiles[] = null;
@@ -187,115 +309,20 @@ public class AyonixUnlockService extends Service {
         }
 
         try {
-            faceTracker = new AyonixFaceTracker(engine, detectionPeriod, minFaceSize,
-                    maxFaceSize, qualityThreshold);
-            Log.d("faceService", "face tracker created successfully");
+            faceTracker = new AyonixFaceTracker(engine, DETECTIONPERIOD, MINFACESIZE,
+                    MAXFACESIZE, QUALITYTHRESHOLD);
         } catch (AyonixException e) {
             Log.d("faceService", "initializing face tracker failed :(");
             e.printStackTrace();
-
         }
-
-        mOnImageAvailableListener = new ImageReader.OnImageAvailableListener() {
-            @Override
-            public void onImageAvailable(ImageReader reader) {
-                Image image = null;
-                Log.d("faceService", "image available from recording");
-                System.out.println("trying to process image!!");
-                try {
-                    image = reader.acquireLatestImage();
-
-                    int width = image.getWidth();
-                    int height = image.getHeight();
-                    //
-                    byte gray[] = new byte[width * height];
-
-                    Bitmap bitmap = YUV_420_888_toRGB(image, width, height);
-                    int pixels[] = new int[bitmap.getWidth() * bitmap.getHeight()];
-
-                    bitmap = rotateImage(bitmap);
-                    Log.d("faceService", "rotated image");
-
-                    bitmap.getPixels(pixels, 0, image.getHeight(), 0, 0, image.getHeight(), image.getWidth());
-                    Log.d("faceService", "bitmap to pixels complete");
-
-                    for (int i = 0; i < pixels.length; i++) {
-                        gray[i] = (byte) (255 * Color.luminance(pixels[i]));
-                    }
-
-                    AyonixImage frame = new AyonixImage(height, width, false, height, gray);
-                    Log.d("faceService", "got frame: " + frame);
-
-                    AyonixFace[] updatedfaces = faceTracker.UpdateTracker(frame);
-                    Log.d("faceService", "updated tracker " + updatedfaces + "\n");
-                    for(AyonixFace face : updatedfaces){
-                        System.out.println("face found from tracker: " + face);
-                    }
-
-                    AyonixRect[] faceRects = engine.DetectFaces(frame, 5);
-                    AyonixFace[] faces = new AyonixFace[faceRects.length];
-                    float[] scores = new float[faces.length];
-                    Log.d("faceService", "got faces");
-
-                    if(faceRects.length <= 0) {
-                        return;
-                    }
-
-                    for(int i = 0; i < faceRects.length; i++) {
-                        faces[i] = engine.ExtractFaceFromRect(frame, faceRects[i]);
-                        byte[] afidData = engine.CreateAfid(faces[i]);
-                        engine.MatchAfids(afidData, afidVec, scores);
-
-                        Log.i("info", "  Afid[1] vs Afid[" + (i + 1) + "]: " + (100 * scores[i]) + "\n");
-                        if(100*scores[i] >= minMatch){
-                            Toast.makeText(AyonixUnlockService.this, "Match successful.\n",
-                                    Toast.LENGTH_SHORT).show();
-                            image.close();
-
-                            //TODO unlock phone
-                        }
-                    }
-                    Log.i("info", "Done\n");
-
-                    image.close();
-                } catch (AyonixException e) {
-                    e.printStackTrace();
-                }
-            }
-        };
     }
 
-    public int onStartCommand(Intent intent, int flags, int startId){
-        if(intent != null)
-        {
-            String action = intent.getAction();
-            Log.d("faceService", "Switching action");
-            switch (action)
-            {
-                case ACTION_START_FOREGROUND_SERVICE:
-                    Log.d("faceService", "starting foreground service");
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                        startForegroundService();
-                    else
-                        startForeground(1, new Notification());
-                    Toast.makeText(getApplicationContext(), "Foreground service is started.", Toast.LENGTH_LONG).show();
-                    break;
-                case ACTION_STOP_FOREGROUND_SERVICE:
-                    stopForegroundService();
-                    Toast.makeText(getApplicationContext(), "Foreground service is stopped.", Toast.LENGTH_LONG).show();
-                    break;
-                case ACTION_PLAY:
-                    Toast.makeText(getApplicationContext(), "You click Play button.", Toast.LENGTH_LONG).show();
-                    break;
-                default:
-                    Toast.makeText(getApplicationContext(), "Something went wrong starting service", Toast.LENGTH_LONG).show();
-                    break;
-            }
-        }
-        return super.onStartCommand(intent, flags, startId);
-
-        /*super.onStartCommand(intent, flags, startId);
-        return START_STICKY;*/
+    public void onDestroy(){
+        super.onDestroy();
+        System.out.println("Service destroyed.");
+        unregisterReceiver(receive);
+        sendBroadcast(false);
+        stopSelf();
     }
 
     private synchronized String createChannel(){
@@ -314,45 +341,80 @@ public class AyonixUnlockService extends Service {
         return NOTIFICATION_CHANNEL_ID;
     }
 
-    private void startPreview() {
-        CameraManager manager = (CameraManager)getSystemService(Context.CAMERA_SERVICE);
-        CameraCharacteristics characteristics = null;
+    private void setMasterList(){
+        ObjectInputStream ois = null;
         try {
-            characteristics = manager.getCameraCharacteristics(cameraId);
-        } catch (CameraAccessException e) {
+            ois = new ObjectInputStream(new FileInputStream(afidFile));
+        } catch (IOException e) {
             e.printStackTrace();
         }
-        int support = characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
+        if(ois == null)
+            masterList = new HashMap<>();
+        else {
+            try {
+                masterList = (HashMap<byte[], EnrolledInfo>) ois.readObject();
+            } catch (ClassNotFoundException | IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
 
-        Log.d("faceService", "match mode");
-        if(null == imageReader)
-            setImageReader();
-        //if(support == CameraMetadata.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY)
+    private void startPreview() {
+        setImageReader();
         try {
+            List<Surface> outputSurfaces = new ArrayList<>();
+            outputSurfaces.add(imageReader.getSurface());
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
             captureRequestBuilder.addTarget(imageReader.getSurface());
             captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
 
-            cameraDevice.createCaptureSession(null, new CameraCaptureSession.StateCallback() {
+            cameraDevice.createCaptureSession(outputSurfaces, new CameraCaptureSession.StateCallback() {
                 @Override
                 public void onConfigured(CameraCaptureSession session) {
-                    //session.capture(captureRequestBuilder.build(), null, null);
-                    try {
-                        session.setRepeatingRequest(captureRequestBuilder.build(), null, null);
-                    } catch (CameraAccessException e) {
-                        e.printStackTrace();
-                    }
+                    Log.d(TAG, "onConfigured: configured!!!!");
+                    cameraCaptureSession = session;
+                    updatePreview();
                 }
 
                 @Override
                 public void onConfigureFailed(CameraCaptureSession session) {
-                    Toast.makeText(getApplicationContext(),
-                            "Unable to setup camera preview", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getApplicationContext(),"Unable to setup camera preview", Toast.LENGTH_SHORT).show();
+                }
+
+                @Override
+                public void onClosed(CameraCaptureSession session) {
+                    super.onClosed(session);
+                    Log.d(TAG, session.toString() + " session was closed :(");
+                    startPreview();
                 }
             }, null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+    }
+
+    private void updatePreview() {
+        if (cameraDevice == null)
+            Toast.makeText(this, "Error", Toast.LENGTH_SHORT).show();
+        try {
+            Log.d(TAG, "update preview");
+            if(cameraCaptureSession == null)
+                startPreview();
+            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
+            captureRequestBuilder.addTarget(imageReader.getSurface());
+            cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, null);
+            timer = new Timer();
+            timer.schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    //if(!getAwake()) liveMatching((Vector<AyonixFace>)facesToMatch.clone(), bitmapsToMatch);
+                }
+            }, 0, 3000);
+
+            } catch (CameraAccessException e1) {
+                e1.printStackTrace();
+            }
     }
 
     private void startForegroundService() {
@@ -361,9 +423,6 @@ public class AyonixUnlockService extends Service {
         // Create notification default intent.
         Intent intent = new Intent();
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, 0);
-
-        //openCamera();
-        //startPreview();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             String channelName = createChannel();
@@ -405,22 +464,6 @@ public class AyonixUnlockService extends Service {
         } else {
             startForeground(1, new Notification());
         }
-
-        /*// setup front camera
-        try {
-            String cameraId = null;
-            Log.d("cameras", "service getting front camera");
-            CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-            for (String camera : manager.getCameraIdList()) {
-                CameraCharacteristics characteristics = manager.getCameraCharacteristics(camera);
-                int frontCam = characteristics.get(CameraCharacteristics.LENS_FACING);
-                cameraId = camera;
-                if (frontCam == CameraCharacteristics.LENS_FACING_FRONT) { break; }
-            }
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }*/
-
     }
 
     private BroadcastReceiver receive = new BroadcastReceiver() {
@@ -432,22 +475,10 @@ public class AyonixUnlockService extends Service {
                 Log.d("faceService", "starting facial recognition...");
                 KeyguardManager keyguardManager = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
                 if (keyguardManager.isKeyguardLocked() || keyguardManager.isDeviceLocked()) {
-                    //AyonixImage frame = new AyonixImage(width, height, true, width, );
-
-                    /*CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-                    CameraCharacteristics characteristics = null;
-                    try {
-                        characteristics = manager.getCameraCharacteristics(cameraDevice.getId());
-                    } catch (CameraAccessException e) {
-                        e.printStackTrace();
-                    }
-                    int support = characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
-
-                    Log.d("faceService", "match mode");
-                    if (null == imageReader)
-                        startPreview();*/
-                    sendBroadcast(true);
-
+                    if(cameraDevice == null)
+                        openCamera();
+                    //sendBroadcast(true);
+                    //stopForegroundService();
                 }
             }
         }
@@ -456,9 +487,13 @@ public class AyonixUnlockService extends Service {
     // Helper Functions
     private void sendBroadcast(boolean success){
         if(success){
-            Intent successIntent = new Intent("unlock");
-            successIntent.putExtra("success", success);
-            LocalBroadcastManager.getInstance(this).sendBroadcast(successIntent);
+            Intent unlock = new Intent("unlock");
+            unlock.setClassName("com.example.ayonixandroidsdkdemo",
+                    "com.example.ayonixandroidsdkdemo.MainActivity");
+            unlock.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            unlock.putExtra("success", success);
+            LocalBroadcastManager.getInstance(this).sendBroadcast(unlock);
+            Log.d(TAG, "sendBroadcast: sent unlock broadcast");
         }
         else{
             Intent startActivity = new Intent(this, MainActivity.class);
@@ -471,92 +506,62 @@ public class AyonixUnlockService extends Service {
 
     }
 
-    private void setImageReader() {
-        while (null == cameraDevice) {
-            Log.e("faceService", "cameraDevice is null");
+    private void openCamera() {
+        if (null == this)
             return;
-        }
-        Log.d("faceService", "setting up image reader");
-        CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        CameraManager manager = (CameraManager) this.getSystemService(Context.CAMERA_SERVICE);
         try {
-            final CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraDevice.getId());
-            Size[] imgSizes = null;
+            setupCamera();
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                manager.openCamera(cameraId, stateCallback, null);
+                Log.d(TAG, "camera opened.");
+            } else {
+                Log.d(TAG, "openCamera: App requires access to camera");
+                Toast.makeText(this, "App requires access to camera", Toast.LENGTH_SHORT).show();
+            }
+        } catch (CameraAccessException e) {
+            Toast.makeText(this, "Cannot access the camera.", Toast.LENGTH_SHORT).show();
+        }
+    }
 
+    private void setupCamera() {
+        CameraManager manager = (CameraManager) this.getSystemService(Context.CAMERA_SERVICE);
+        try {
+            CameraCharacteristics characteristics = null;
+            for (String camera : manager.getCameraIdList()) {
+                characteristics = manager.getCameraCharacteristics(camera);
+                int frontCam = characteristics.get(CameraCharacteristics.LENS_FACING);
+                cameraId = camera;
+                if (frontCam == CameraCharacteristics.LENS_FACING_FRONT) {
+                    break;
+                }
+            }
+            //mSensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+            StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            if (map == null)
+                throw new RuntimeException("Cannot get available preview/video sizes");
+            /*int deviceOrientation = getWindowManager().getDefaultDisplay().getRotation();
+            int totalRotation = sensorToDeviceRotation(characteristics, deviceOrientation);
+            boolean swapRotation = totalRotation == 90 || totalRotation == 270;
+            int rotatedWidth = width;
+            int rotatedHeight = height;
+            if (swapRotation) {
+                rotatedHeight = width;
+                rotatedWidth = height;
+            }
+            imageDimension = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class), rotatedWidth, rotatedHeight);*/
+
+            Size[] imgSizes = null;
             if (characteristics != null)
                 imgSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP).getOutputSizes(ImageFormat.YUV_420_888);
+            for(Size i: imgSizes)
+                System.out.println(i);
             if (imgSizes != null && 0 < imgSizes.length) {
-                width = imgSizes[0].getWidth();
-                height = imgSizes[0].getHeight();
+                this.width = imgSizes[0].getWidth();
+                this.height = imgSizes[0].getHeight();
             }
-            imageReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, 5);
-            imageReader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
-                @Override
-                public void onImageAvailable(ImageReader reader) {
-                    Log.d("faceService", "image available from recording");
-                    Image image = null;
-                    System.out.println("trying to process image!!");
-                    try {
-                        image = reader.acquireLatestImage();
-
-                        int width = image.getWidth();
-                        int height = image.getHeight();
-                        //
-                        byte gray[] = new byte[width * height];
-
-                        Bitmap bitmap = YUV_420_888_toRGB(image, width, height);
-                        int pixels[] = new int[bitmap.getWidth() * bitmap.getHeight()];
-
-                        bitmap = rotateImage(bitmap);
-                        Log.d("faceService", "rotated image");
-
-                        bitmap.getPixels(pixels, 0, image.getHeight(), 0, 0, image.getHeight(), image.getWidth());
-                        Log.d("faceService", "bitmap to pixels complete");
-
-                        for (int i = 0; i < pixels.length; i++) {
-                            gray[i] = (byte) (255 * Color.luminance(pixels[i]));
-                        }
-
-                        AyonixImage frame = new AyonixImage(height, width, false, height, gray);
-                        Log.d("faceService", "got frame: " + frame);
-
-                        AyonixFace[] updatedfaces = faceTracker.UpdateTracker(frame);
-                        Log.d("faceService", "updated tracker " + updatedfaces + "\n");
-                        for (AyonixFace face : updatedfaces) {
-                            System.out.println("face found from tracker: " + face);
-                        }
-
-                        AyonixRect[] faceRects = engine.DetectFaces(frame, 5);
-                        AyonixFace[] faces = new AyonixFace[faceRects.length];
-                        float[] scores = new float[faces.length];
-                        Log.d("faceService", "got faces");
-
-                        if (faceRects.length <= 0) {
-
-                        }
-
-                        for (int i = 0; i < faceRects.length; i++) {
-                            faces[i] = engine.ExtractFaceFromRect(frame, faceRects[i]);
-
-                            byte[] afidData = engine.CreateAfid(faces[i]);
-                            engine.MatchAfids(afidData, afidVec, scores);
-
-                            Log.i("info", "  Afid[1] vs Afid[" + (i + 1) + "]: " + (100 * scores[i]) + "\n");
-                            if (100 * scores[i] >= minMatch) {
-                                Toast.makeText(AyonixUnlockService.this, "Match successful.\n",
-                                        Toast.LENGTH_SHORT).show();
-                                image.close();
-                            }
-                        }
-                        Log.i("info", "Done\n");
-
-                        image.close();
-
-                    } catch (AyonixException e) {
-                        e.printStackTrace();
-                    }
-
-                }
-            }, null);
+            System.out.println("width: " + this.width + " , height: " + this.height);
+            System.out.println("image dimension: " + imageDimension);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -683,47 +688,32 @@ public class AyonixUnlockService extends Service {
         return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
     }
 
-    private void openCamera() {
-        if (null == this) {
-            return;
+    private void setImageReader() {
+        while (null == cameraDevice) {
+            Log.e(TAG, "cameraDevice is null :(");
         }
-        CameraManager manager = (CameraManager) this.getSystemService(Context.CAMERA_SERVICE);
+        Log.d(TAG, "setting up image reader");
+        CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
         try {
-            setupCamera(width,height);
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                manager.openCamera(cameraId, stateCallback, null);
-                Log.d("faceService", "camera opened.");
-            }
-        } catch (CameraAccessException e) {
-            Toast.makeText(this, "Cannot access the camera.", Toast.LENGTH_SHORT).show();
-        }
-    }
+            final CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraDevice.getId());
+            Size[] imgSizes = null;
 
-    private void setupCamera(int width, int height) {
-        CameraManager manager = (CameraManager) this.getSystemService(Context.CAMERA_SERVICE);
-        try {
-            CameraCharacteristics characteristics = null;
-            for (String camera : manager.getCameraIdList()) {
-                characteristics = manager.getCameraCharacteristics(camera);
-                int frontCam = characteristics.get(CameraCharacteristics.LENS_FACING);
-                cameraId = camera;
-                if (frontCam == CameraCharacteristics.LENS_FACING_FRONT) {
+            if (characteristics != null)
+                imgSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP).getOutputSizes(ImageFormat.YUV_420_888);
+
+            for(int i = 0; i < imgSizes.length; i++) {
+                /* imgSizes is ordered largest to smallest -> get dimension just under max */
+                if((imgSizes[i].getWidth()*imgSizes[i].getHeight() < MAXPIXELS)
+                        && (imgSizes[i].getWidth() != imgSizes[i].getHeight())){
+                    width = imgSizes[i].getWidth();
+                    height = imgSizes[i].getHeight();
                     break;
                 }
             }
-            //mSensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-            StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-            if (map == null)
-                throw new RuntimeException("Cannot get available preview/video sizes");
 
-            Size[] imgSizes = null;
-            if (characteristics != null)
-                imgSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP).getOutputSizes(ImageFormat.YUV_420_888);
-            if (imgSizes != null && 0 < imgSizes.length) {
-                this.width = imgSizes[0].getWidth();
-                this.height = imgSizes[0].getHeight();
-            }
-            System.out.println("width: " + width + " , height: " + height);
+            Log.d(TAG, "setImageReader: widthXheight = " + width + "X" + height);
+            imageReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, MAXIMAGES);
+            imageReader.setOnImageAvailableListener(mOnImageAvailableListener, null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -768,16 +758,27 @@ public class AyonixUnlockService extends Service {
 
         @Override
         public void onDisconnected(CameraDevice camera) {
-            cameraDevice.close();
-            cameraDevice = null;
+            cameraDevice = camera;
+            closeCamera();
         }
 
         @Override
         public void onError(CameraDevice camera, int error) {
+            if(cameraDevice != null)
+                closeCamera();
+        }
+    };
+
+    private void closeCamera() {
+        if (null != cameraDevice) {
             cameraDevice.close();
             cameraDevice = null;
         }
-    };
+        if (null != imageReader) {
+            imageReader.close();
+            imageReader = null;
+        }
+    }
 
     private void stopForegroundService()
     {
@@ -790,12 +791,4 @@ public class AyonixUnlockService extends Service {
         stopSelf();
     }
 
-
-    public void onDestroy(){
-        super.onDestroy();
-        System.out.println("Service destroyed.");
-        unregisterReceiver(receive);
-        sendBroadcast(false);
-        stopSelf();
-    }
 }

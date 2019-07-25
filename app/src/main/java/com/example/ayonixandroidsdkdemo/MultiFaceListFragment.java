@@ -71,7 +71,7 @@ public class MultiFaceListFragment extends Fragment {
             } else {
                 recyclerView.setLayoutManager(new GridLayoutManager(context, mColumnCount));
             }
-            recyclerView.setAdapter(new EnrolledPeopleAdapter(new HashMap<byte[], EnrolledInfo>(), context, new MugshotRecyclerViewAdapter(new ArrayList<File>())));
+            recyclerView.setAdapter(new EnrolledPeopleAdapter(new HashMap<byte[], EnrolledInfo>(), context));
         }
         return view;
     }

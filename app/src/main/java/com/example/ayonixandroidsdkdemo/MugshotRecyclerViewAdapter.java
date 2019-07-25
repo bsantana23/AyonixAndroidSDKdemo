@@ -85,7 +85,7 @@ public class MugshotRecyclerViewAdapter extends RecyclerView.Adapter<MugshotRecy
             Log.d(TAG, "binding..");
             if(null != jpegFile) {
                 Bitmap bm = BitmapFactory.decodeFile(jpegFile.getAbsolutePath());
-                bm = MainActivity.scaleDown(bm, 350, true);
+                bm = MainActivity.scaleBitmap(bm, 350, true);
                 mugshot.setImageBitmap(bm);
                 mugshot.setVisibility(View.VISIBLE);
             }

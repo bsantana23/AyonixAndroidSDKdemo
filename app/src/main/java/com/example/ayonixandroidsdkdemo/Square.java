@@ -15,7 +15,8 @@ public class Square {
     private int positionHandle;
     private int colorHandle;
 
-    private float color[] = {0.688875f, 0.3125f, 0.25555f, 0.53332254f};
+
+    private float color[] = {128, 128, 128f, 0f};
 
     /* private final String vertexShaderCode =
              "attribute vec4 vPosition;" +

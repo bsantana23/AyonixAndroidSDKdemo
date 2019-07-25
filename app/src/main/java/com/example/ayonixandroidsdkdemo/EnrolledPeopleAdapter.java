@@ -27,13 +27,11 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
     private final String TAG = "enrolledPeopleAdapter";
     private int index;
     private Vector<byte[]> afidList;
-    private MugshotRecyclerViewAdapter mugshotRecyclerViewAdapter;
 
-    public EnrolledPeopleAdapter(HashMap<byte[], EnrolledInfo> myDataset, Context context, MugshotRecyclerViewAdapter m) {
+    public EnrolledPeopleAdapter(HashMap<byte[], EnrolledInfo> myDataset, Context context) {
         enrolledPeople = myDataset;
         this.context = (MainActivity)context;
         afidList = new Vector<>(myDataset.keySet());
-        mugshotRecyclerViewAdapter = m;
     }
 
     public void setFacesToEnroll(HashMap<byte[], EnrolledInfo> enrolled) {
@@ -129,12 +127,13 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
                 /*mugshotRecyclerViewAdapter.setImagesToShow(info.getMugshots());
                 mugshotRecyclerViewAdapter.notifyDataSetChanged();*/
                 Bitmap bm = BitmapFactory.decodeFile(enrolledInfo.getMugshots().get(0).getAbsolutePath());
-                bm = MainActivity.scaleDown(bm, 350, true);
+                bm = MainActivity.scaleBitmap(bm, 350, true);
                 mugshot.setImageBitmap(bm);
                 mugshot.setVisibility(View.VISIBLE);
 
                 // print persons info
-                String information = enrolledInfo.getName() + "\n" +
+                String information = (enrolledInfo.getName() == null ?
+                                    "N/A": enrolledInfo.getName()) + "\n" +
                                      enrolledInfo.getAge()+ "y" + "\n" +
                                      enrolledInfo.getGender();
                 info.setText(information);
@@ -166,5 +165,10 @@ public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAd
             return afidList.get(checkedPosition);
         }
         return null;
+    }
+
+    public void resetSelection(){
+        notifyItemChanged(checkedPosition);
+        checkedPosition = -1;
     }
 }
