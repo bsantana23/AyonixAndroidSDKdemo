@@ -10,17 +10,21 @@ import ayonix.AyonixImage;
 
 public class EnrolledInfo implements Serializable {
 
-    private ArrayList<File> allMugshots;
-    private String name;
-    private String gender;
-    private String timestamp;
-    private int age;
-    private boolean enrolled;
-    private float currHighestQuality;
-    private Bitmap mugshot; //mugshot of captured person
-    private Bitmap matchedMugshot; //mugshot of person in system - used for people captured but not enrolled
-    private boolean matched; //does item match with afid in master list
-    private float quality; //min quality -> used to minimize duplicates
+    private ArrayList<File> allMugshots; // list of all saved mugshots      {enrollment}
+    private String name; // persons name                                    {enrollment && matching}
+    private String gender; // persons gender                                {enrollment && matching}
+    private int age; // persons age                                         {enrollment && matching}
+    private String timestamp; // timestamp to log matches                   {matching}
+    private Bitmap mugshot0; //mugshot of captured person                   {matching}
+    private Bitmap matchedMugshot0; //mugshot of person in system           {matching}
+    private File mugshot; //mugshot of captured person                      {matching}
+    private File matchedMugshot; //mugshot of person in system              {matching}
+    private boolean enrolled; // matches with enrolled afid                 {matching}
+    private boolean matched; // matches with afid in master list            {matching}
+    private float quality; //min quality -> used to minimize duplicates     {  }
+    private float currHighestQuality; //min quality to match with           {matching}
+    private int trackerID; //used to match faces easier                     {matching}
+
 
     public EnrolledInfo(ArrayList<File> mugshots, String name, String gender, int age, float quality) {
         this.name = name;
@@ -30,39 +34,80 @@ public class EnrolledInfo implements Serializable {
         allMugshots = mugshots;
     }
 
-    public ArrayList<File> getMugshots(){
+    public ArrayList<File> getMugshots() {
         return allMugshots;
     }
 
-    public String getName(){ return name; }
+    public String getName() {
+        return name;
+    }
 
-    public String getGender(){ return gender; }
+    public String getGender() {
+        return gender;
+    }
 
-    public int getAge(){ return age; }
+    public int getAge() {
+        return age;
+    }
 
-    public void setTimestamp(String time){ timestamp = time; }
-    public String getTimestamp(){ return timestamp; }
+    public void setTimestamp(String time) {
+        timestamp = time;
+    }
+    public String getTimestamp() {
+        return timestamp;
+    }
 
-    public void setMatched(boolean b){ matched = b; }
-    public boolean getMatched(){ return matched; }
+    public void setMatched(boolean b) {
+        matched = b;
+    }
+    public boolean getMatched() {
+        return matched;
+    }
 
-    public void setCurrHighestQuality(float q) { currHighestQuality = q; }
-    public float getCurrHighestQuality(){ return currHighestQuality; }
+    public void setCurrHighestQuality(float q) {
+        currHighestQuality = q;
+    }
+    public float getCurrHighestQuality() {
+        return currHighestQuality;
+    }
 
-    public void setEnrolled(boolean b){ enrolled = b; }
-    public boolean getEnrolled(){ return enrolled; }
+    public void setEnrolled(boolean b) {
+        enrolled = b;
+    }
+    public boolean getEnrolled() {
+        return enrolled;
+    }
 
-    public void setMugshotFile(File f){
-        if(null == allMugshots)
+    public void setMugshotFile(File f) {
+        if (null == allMugshots)
             allMugshots = new ArrayList<>();
         else
             allMugshots.clear();
         allMugshots.add(f);
     }
 
-    public void setMugshot(Bitmap b){ mugshot = b; }
-    public Bitmap getMugshot(){ return mugshot; }
+    public void setMugshot(File b) {
+        mugshot = b;
+    }
+    public File getMugshot() {
+        return mugshot;
+    }
 
-    public void setMugshotMatched(Bitmap b){ matchedMugshot = b; }
-    public Bitmap getMugshotMatched(){ return matchedMugshot; }
+    public void setMugshotMatched(File b) {
+        matchedMugshot = b;
+    }
+    public File getMugshotMatched() {
+        return matchedMugshot;
+    }
+
+    public void setTrackerID(int id){ trackerID = id; }
+    public int getTrackerID(){ return trackerID; }
+
+    /*public void setMatchedAfid(byte[] afid){
+        matchedAfid = afid;
+    }
+
+    public byte[] getMatchedAfid() {
+        return matchedAfid;
+    }*/
 }

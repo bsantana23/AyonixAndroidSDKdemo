@@ -16,4 +16,5 @@
     <string name="mugshot_image">mugshot image</string>
     <string name="matched_mugshot">matched mugshot</string>
     <string name="check_box_to_show_selection">check box to show selection</string>
+    <string name="used_to_show_blurry_image">used to show blurry image</string>
 </resources>

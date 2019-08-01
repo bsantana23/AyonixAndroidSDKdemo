@@ -68,8 +68,6 @@ import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
 
-import com.xxxyyy.testcamera2.ScriptC_yuv420888;
-
 import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
 import org.opencv.core.CvType;
@@ -80,7 +78,6 @@ public class AyonixUnlockService extends Service {
 
     private AyonixFaceID engine = null;
     private AyonixFaceTracker faceTracker = null;
-    private static final String TAG_FOREGROUND_SERVICE = "FOREGROUND_SERVICE";
     public static final String ACTION_START_FOREGROUND_SERVICE = "ACTION_START_FOREGROUND_SERVICE";
     public static final String ACTION_STOP_FOREGROUND_SERVICE = "ACTION_STOP_FOREGROUND_SERVICE";
     public static final String ACTION_PAUSE = "ACTION_PAUSE";
@@ -102,8 +99,8 @@ public class AyonixUnlockService extends Service {
     protected CaptureRequest.Builder captureRequestBuilder;
     private String cameraId;
     private Size imageDimension;
-
-    private Context context;
+    private boolean screenOn = false;
+    private boolean unlockMode = false;
 
     private HashMap<byte[], EnrolledInfo> masterList = null;
 
@@ -118,6 +115,7 @@ public class AyonixUnlockService extends Service {
     private File afidFolder = null;
     private File imageFolder = null;
 
+    private static final String TAG = "faceService";
     private static final String TAG2 = "GetMyAFIDs";
     private CameraCaptureSession cameraCaptureSession;
     private Timer timer;
@@ -144,7 +142,7 @@ public class AyonixUnlockService extends Service {
                     Mat tmp = new Mat(width, height, CvType.CV_8UC1);
                     Utils.bitmapToMat(bitmap, tmp);
                     Imgproc.cvtColor(tmp, tmp, Imgproc.COLOR_RGB2GRAY);
-                    //there could be some processing
+                    //there could be some processingx
                     Imgproc.cvtColor(tmp, tmp, Imgproc.COLOR_GRAY2RGB, 4);
                     Utils.matToBitmap(tmp, bitmap);
                     bitmap.getPixels(pixels, 0, bitmap.getWidth(),
@@ -175,21 +173,22 @@ public class AyonixUnlockService extends Service {
                                                     "       " + (face.gender > 0 ? "female" : "male") + "\n" +
                                                     "       " + (int) face.age + "y\n" +
                                                     "       " + (face.expression.smile > 0.1 ? "smiling" : "no smile") + "\n" + //face.expression.smile < -0.9 ? "frowning" : "neutral") + "\n" +
-                                                    "       mouth open: " + Math.round(face.expression.mouthOpen * 100) + "%" + "\n" +
                                                     "       quality: " + Math.round(face.quality * 100) + "%" + "\n" +
                                                     "       roll: " + (int) (face.roll) + "\n" +
                                                     "       pitch: " + (int) (face.pitch) + "\n" +
-                                                    "       yaw: " + (int) (face.yaw) + "\n" +
-                                                    "       location x:" + face.location.x + ", y:" + face.location.y + ", w:" + face.location.w + " , h:" + face.location.h + "\n" +
-                                                    "       muglocation x:" + face.mugLocation.x + ", y:" + face.mugLocation.y + ", w:" + face.mugLocation.w + " , h:" + face.mugLocation.h + "\n\n");
-                                    System.out.println(info);
+                                                    "       yaw: " + (int) (face.yaw) + "\n" );
+                                    Log.d(TAG, "onImageAvailable: " + info);
                                     byte[] afid = engine.CreateAfid(face);
                                     engine.MatchAfids(afid, afids, scores);
                                     for (int j = 0; j < scores.length; j++) {
+                                        Log.d(TAG, "onImageAvailable: score = " + (scores[j]*100));
                                         if (scores[j] * 100 >= MINMATCH) {
-                                            Log.d(TAG, "onImageAvailable: unlocking!!");
-                                            sendBroadcast(true);
-                                            closeCamera();
+                                            KeyguardManager keyguardManager = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+                                            if (screenOn && (keyguardManager.isKeyguardLocked() || keyguardManager.isDeviceLocked())) {
+                                                Log.d(TAG, "onImageAvailable: unlocking!!");
+                                                closeCamera();
+                                                sendBroadcast(true);
+                                            }
                                         }
                                     }
                                 } catch (AyonixException e) {
@@ -218,8 +217,7 @@ public class AyonixUnlockService extends Service {
                     Log.d("faceService", "starting foreground service");
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                         startForegroundService();
-                    else
-                        startForeground(1, new Notification());
+                    else startForeground(1, new Notification());
                     Toast.makeText(getApplicationContext(), "Foreground service is started.", Toast.LENGTH_LONG).show();
                     break;
                 case ACTION_STOP_FOREGROUND_SERVICE:
@@ -236,8 +234,7 @@ public class AyonixUnlockService extends Service {
         }
         return super.onStartCommand(intent, flags, startId);
 
-        /*super.onStartCommand(intent, flags, startId);
-        return START_STICKY;*/
+        //return START_STICKY;
     }
 
     @Override
@@ -264,8 +261,6 @@ public class AyonixUnlockService extends Service {
         filter.addAction(Intent.ACTION_SCREEN_ON);
         filter.addAction(Intent.ACTION_SCREEN_OFF);
         registerReceiver(receive, filter);
-
-        openCamera();
 
         // step 1. list assets (and make sure engine and test image are there)
         String engineAssetFiles[] = null;
@@ -304,7 +299,7 @@ public class AyonixUnlockService extends Service {
             engine = new AyonixFaceID(filesDir + "/engine", 816371403418L, "ju8zyppzgwh7a9qn");
             Log.d("faceService", "Loaded engine");
         } catch (AyonixException e) {
-            System.out.format("Caught Ayonix Error %d\n", e.errorCode);
+            Log.d(TAG, "onCreate: " + "Caught Ayonix Error " + e.errorCode);
             e.printStackTrace();
         }
 
@@ -319,7 +314,7 @@ public class AyonixUnlockService extends Service {
 
     public void onDestroy(){
         super.onDestroy();
-        System.out.println("Service destroyed.");
+        Log.d(TAG, "onDestroy: service destroyed");
         unregisterReceiver(receive);
         sendBroadcast(false);
         stopSelf();
@@ -394,27 +389,30 @@ public class AyonixUnlockService extends Service {
     }
 
     private void updatePreview() {
-        if (cameraDevice == null)
+        if (cameraDevice == null) {
             Toast.makeText(this, "Error", Toast.LENGTH_SHORT).show();
-        try {
-            Log.d(TAG, "update preview");
-            if(cameraCaptureSession == null)
-                startPreview();
-            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
-            captureRequestBuilder.addTarget(imageReader.getSurface());
-            cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, null);
-            timer = new Timer();
-            timer.schedule(new TimerTask() {
-                @Override
-                public void run() {
-                    //if(!getAwake()) liveMatching((Vector<AyonixFace>)facesToMatch.clone(), bitmapsToMatch);
-                }
-            }, 0, 3000);
+            openCamera();
+        }
+        if(unlockMode) {
+            try {
+                Log.d(TAG, "update preview");
+                if (cameraCaptureSession == null)
+                    startPreview();
+                captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
+                captureRequestBuilder.addTarget(imageReader.getSurface());
+                cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, null);
 
             } catch (CameraAccessException e1) {
                 e1.printStackTrace();
             }
+        } else{
+            try {
+                cameraCaptureSession.stopRepeating();
+            } catch (CameraAccessException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     private void startForegroundService() {
@@ -471,15 +469,28 @@ public class AyonixUnlockService extends Service {
         public void onReceive(Context context, Intent intent) {
 
             Log.d("faceService", "received intent.");
-            if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
-                Log.d("faceService", "starting facial recognition...");
-                KeyguardManager keyguardManager = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
-                if (keyguardManager.isKeyguardLocked() || keyguardManager.isDeviceLocked()) {
-                    if(cameraDevice == null)
+            switch(intent.getAction()){
+                case(Intent.ACTION_SCREEN_ON):
+                    Log.d("faceService", "starting facial recognition...");
+                    screenOn = true;
+                    unlockMode = true;
+                    KeyguardManager keyguardManager = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+                    if ((keyguardManager.isKeyguardLocked() || keyguardManager.isDeviceLocked())) {
                         openCamera();
-                    //sendBroadcast(true);
-                    //stopForegroundService();
-                }
+                        Log.d(TAG, "onReceive: "+intent.getClass());
+                        //keyguardManager.requestDismissKeyguard(, null);
+                    }
+                    break;
+
+                case(Intent.ACTION_SCREEN_OFF):
+                    screenOn = false;
+                    unlockMode = false;
+                    closeCamera();
+                    Log.d(TAG, "onReceive: camera closed");
+                    break;
+
+                default:
+                    return;
             }
         }
     };
@@ -555,13 +566,13 @@ public class AyonixUnlockService extends Service {
             if (characteristics != null)
                 imgSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP).getOutputSizes(ImageFormat.YUV_420_888);
             for(Size i: imgSizes)
-                System.out.println(i);
+                Log.d(TAG, "setupCamera: " + i);
             if (imgSizes != null && 0 < imgSizes.length) {
                 this.width = imgSizes[0].getWidth();
                 this.height = imgSizes[0].getHeight();
             }
-            System.out.println("width: " + this.width + " , height: " + this.height);
-            System.out.println("image dimension: " + imageDimension);
+            Log.d(TAG, "setupCamera: " + "width: " + this.width + " , height: " + this.height);
+            Log.d(TAG, "setupCamera: " + "image dimension: " + imageDimension);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -689,7 +700,7 @@ public class AyonixUnlockService extends Service {
     }
 
     private void setImageReader() {
-        while (null == cameraDevice) {
+        if (null == cameraDevice) {
             Log.e(TAG, "cameraDevice is null :(");
         }
         Log.d(TAG, "setting up image reader");
@@ -758,18 +769,24 @@ public class AyonixUnlockService extends Service {
 
         @Override
         public void onDisconnected(CameraDevice camera) {
+            Log.d(TAG, "onDisconnected: camera disconnected");
             cameraDevice = camera;
             closeCamera();
         }
 
         @Override
         public void onError(CameraDevice camera, int error) {
+            Log.d(TAG, "onError: error with camera");
             if(cameraDevice != null)
                 closeCamera();
         }
     };
 
     private void closeCamera() {
+        if(null != cameraCaptureSession){
+            cameraCaptureSession.close();
+            cameraCaptureSession = null;
+        }
         if (null != cameraDevice) {
             cameraDevice.close();
             cameraDevice = null;
@@ -782,7 +799,7 @@ public class AyonixUnlockService extends Service {
 
     private void stopForegroundService()
     {
-        Log.d(TAG_FOREGROUND_SERVICE, "Stop foreground service.");
+        Log.d(TAG, "Stop foreground service.");
 
         // Stop foreground service and remove the notification.
         stopForeground(true);

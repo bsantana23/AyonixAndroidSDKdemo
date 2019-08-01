@@ -1,5 +1,6 @@
 package com.example.ayonixandroidsdkdemo;
 
+import android.content.Context;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLU;
@@ -17,6 +18,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
     private Square square;
     public volatile float mAngle;
     private float translateX, translateY;
+    private MainActivity context;
 
     private final float[] vPMatrix = new float[16];
     private final float[] projectionMatrix = new float[16];
@@ -53,8 +55,8 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         // Redraw background color
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
-        Log.d(TAG, "onDrawFrame: draw = "+MainActivity.getDraw());
-        if(MainActivity.getFoundFace() && MainActivity.getDraw()) {
+        Log.d(TAG, "onDrawFrame: draw = "+context.getDraw());
+        if(MainActivity.getFoundFace() && context.getDraw() && !context.getEnroll()) {
             Log.d(TAG, "onDrawFrame: found face");
             // initialize to identity matrix
             Matrix.setIdentityM(modelMatrix, 0);
@@ -86,6 +88,10 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         } else
             Log.d(TAG, "onDrawFrame: found no face :)");
 
+    }
+
+    public void clearScreen(){
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
     }
 
     public void onSurfaceChanged(GL10 unused, int width, int height) {
@@ -147,6 +153,8 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         scaleX = scale;
         scaleY = scale;
     }
+
+    public void setContext(MainActivity context){ this.context = context; }
 
 }
 

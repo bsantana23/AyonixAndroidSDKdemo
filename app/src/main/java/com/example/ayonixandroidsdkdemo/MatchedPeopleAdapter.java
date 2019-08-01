@@ -17,7 +17,9 @@ import android.widget.TextView;
 import java.util.HashMap;
 import java.util.Vector;
 
+import ayonix.AyonixException;
 import ayonix.AyonixFace;
+import ayonix.AyonixFaceID;
 
 
 public class MatchedPeopleAdapter extends RecyclerView.Adapter<MatchedPeopleAdapter.MyViewHolder>{
@@ -25,8 +27,10 @@ public class MatchedPeopleAdapter extends RecyclerView.Adapter<MatchedPeopleAdap
     private MainActivity context;
     private final String TAG = "matchedPeopleAdapter";
     private HashMap<byte[], EnrolledInfo> matchedPeople;
+    private HashMap<byte[], EnrolledInfo> masterList;
     private Vector<Bitmap> bitmaps;
     private Vector<byte[]> afidKeySet;
+    private AyonixFaceID engine = null;
 
     public MatchedPeopleAdapter(HashMap<byte[], EnrolledInfo> myDataset, Context context) {
         matchedPeople = myDataset;
@@ -34,8 +38,11 @@ public class MatchedPeopleAdapter extends RecyclerView.Adapter<MatchedPeopleAdap
     }
 
     public void setMatchList(HashMap<byte[], EnrolledInfo> list) {
-        this.matchedPeople = list;
+        matchedPeople = list;
     }
+    public void setMasterList(HashMap<byte[], EnrolledInfo> list) { masterList = list; }
+    public void setEngine(AyonixFaceID e){ engine = e; }
+    public AyonixFaceID getEngine(){ return engine; }
 
     @NonNull
     @Override
@@ -52,9 +59,12 @@ public class MatchedPeopleAdapter extends RecyclerView.Adapter<MatchedPeopleAdap
         else
             viewHolder.itemView.setBackgroundColor(Color.parseColor("#A8D9F8"));
         afidKeySet = new Vector<>(matchedPeople.keySet());
-        if(afidKeySet != null) {
+        if((afidKeySet != null) &&(index < afidKeySet.size())) {
             byte[] key = afidKeySet.elementAt(index);
-            viewHolder.bind(matchedPeople.get(key));
+            if(matchedPeople.containsKey(key))
+                viewHolder.bind(matchedPeople.get(key));
+            else
+                return;
         }
 
     }
@@ -97,12 +107,18 @@ public class MatchedPeopleAdapter extends RecyclerView.Adapter<MatchedPeopleAdap
             Log.d(TAG, "binding..");
             if(null != enrolledInfo) {
 
-                Bitmap matchFace = MainActivity.scaleBitmap(enrolledInfo.getMugshot(), 350, true);
+                //Bitmap matchFace = MainActivity.scaleBitmap(enrolledInfo.getMugshot(), 350, true);
+                Bitmap matchFace = BitmapFactory.decodeFile(enrolledInfo.getMugshot().getAbsolutePath());
                 mugshot.setImageBitmap(matchFace);
                 mugshot.setVisibility(View.VISIBLE);
 
+
                 // print persons info
                 info.setText(null);
+
+
+
+
                 String information = enrolledInfo.getEnrolled() ?
                             ("Matched on "  + enrolledInfo.getTimestamp() + "\n" +
                             "Matched with " + (enrolledInfo.getName() == null ? "N/A" : enrolledInfo.getName()) + "\n" +
@@ -126,11 +142,17 @@ public class MatchedPeopleAdapter extends RecyclerView.Adapter<MatchedPeopleAdap
 
                 if(enrolledInfo.getEnrolled()){
                     Bitmap bm = BitmapFactory.decodeFile(enrolledInfo.getMugshots().get(0).getAbsolutePath());
-                    bm = MainActivity.scaleBitmap(bm, 350, true);
+                    //bm = MainActivity.scaleBitmap(bm, 350, true);
                     enrolledMugshot.setImageBitmap(bm);
                 } else if (enrolledInfo.getMatched() && !enrolledInfo.getEnrolled() ) {
-                    Bitmap bm = MainActivity.scaleBitmap(enrolledInfo.getMugshotMatched(), 350, true);
-                    enrolledMugshot.setImageBitmap(bm);
+                    if(null == enrolledInfo.getMugshotMatched())
+                        enrolledMugshot.setImageResource(R.mipmap.baseline_sentiment_dissatisfied_black_48);
+                    else {
+                        //Bitmap bm = MainActivity.scaleBitmap(enrolledInfo.getMugshotMatched(), 350, true);
+                        Bitmap bm = BitmapFactory.decodeFile(enrolledInfo.getMugshotMatched().getAbsolutePath());
+                        enrolledMugshot.setImageBitmap(bm);
+                        // or set the mugshot not mugshotmatched
+                    }
                 }else {
                     enrolledMugshot.setImageResource(R.mipmap.baseline_sentiment_dissatisfied_black_48);
                 }

@@ -20,10 +20,10 @@ import android.graphics.ImageFormat;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
-import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
+import android.graphics.YuvImage;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -40,8 +40,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
-import android.os.PowerManager;
-import android.support.constraint.ConstraintLayout;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
@@ -54,9 +52,13 @@ import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.support.v8.renderscript.Allocation;
 import android.support.v8.renderscript.Element;
+import android.support.v8.renderscript.Matrix3f;
+import android.support.v8.renderscript.Matrix4f;
 import android.support.v8.renderscript.RenderScript;
 import android.support.v8.renderscript.Script;
 import android.support.v8.renderscript.ScriptIntrinsicBlur;
+import android.support.v8.renderscript.ScriptIntrinsicColorMatrix;
+import android.support.v8.renderscript.ScriptIntrinsicYuvToRGB;
 import android.support.v8.renderscript.Type;
 import android.text.InputType;
 import android.text.method.ScrollingMovementMethod;
@@ -71,8 +73,6 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
-import android.view.Window;
-import android.view.WindowManager;
 import android.view.animation.Animation;
 import android.view.animation.TranslateAnimation;
 import android.widget.Button;
@@ -82,9 +82,6 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.google.gson.JsonSerializer;
-import com.xxxyyy.testcamera2.ScriptC_yuv420888;
-
 import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
 import org.opencv.core.CvType;
@@ -92,14 +89,15 @@ import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -114,7 +112,8 @@ import java.util.Objects;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.Vector;
-
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 import ayonix.AyonixException;
 import ayonix.AyonixFace;
@@ -125,7 +124,7 @@ import ayonix.AyonixLicenseStatus;
 import ayonix.AyonixPoint;
 import ayonix.AyonixVersion;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity<faceToFollow> extends AppCompatActivity {
 
     private Intent serviceIntent;
 
@@ -156,12 +155,13 @@ public class MainActivity extends AppCompatActivity {
     private Handler mBackgroundHandler;
     ImageView matchedMug;
     TextView matchedInfo;
+    private ImageView blurView;
 
     private volatile boolean enroll = false;
     private volatile boolean getPoint1 = true;
     private volatile boolean gotFace = false;
     private volatile boolean isTap = false;
-    private volatile boolean merging = false;
+    private volatile boolean isMerging = false;
     private volatile boolean pointsAreOkay = false;
     private volatile boolean cancel = false;
     private volatile boolean enrolledListOnLeft = true;
@@ -169,13 +169,14 @@ public class MainActivity extends AppCompatActivity {
     private volatile boolean nameProvided = false;
     private volatile boolean locked = false;
     private volatile boolean match = false;
-    private volatile static boolean draw = true;
+    private volatile boolean draw = true;
     private volatile static boolean foundFace = false;
-    private volatile static boolean awake = true;
+    private volatile static boolean isAwake = true;
     private volatile static boolean b_followFace = false;
     private volatile static boolean b_checkMatched = false;
     private volatile static boolean b_liveMatching = false;
-    private boolean bound = false;
+    private boolean isBound = false;
+    private boolean unlockServiceOff = true;
 
     private AyonixFaceID engine;
     private static AyonixFaceTracker faceTracker;
@@ -191,6 +192,12 @@ public class MainActivity extends AppCompatActivity {
     private String confirmMode = "default";
     private RenderScript rs;
     private Timer timer;
+    private Bitmap imageToBlur = null;
+    private Bitmap faceToMatchBitmap = null;
+    /**
+     * A {@link Semaphore} to prevent the app from exiting before closing the camera.
+     */
+    private Semaphore mCameraOpenCloseLock = new Semaphore(1);
 
     //protected HashMap<byte[], ArrayList<File>> masterList = null;
     private HashMap<byte[], EnrolledInfo> masterList = null;
@@ -200,6 +207,17 @@ public class MainActivity extends AppCompatActivity {
     private Vector<Bitmap> bitmapsToMatch = new Vector<>();
     private Vector<Bitmap> bitmapsToShow = new Vector<>();
 
+    /**
+     * Number of bitmaps that is used for RenderScript thread and UI thread synchronization.
+     */
+    private final int NUM_BITMAPS = 2;
+    private int mCurrentBitmap = 0;
+    private Bitmap mBitmapIn;
+    private Bitmap[] mBitmapsOut;
+    private ImageView mImageView;
+
+    private Allocation mInAllocation;
+    private Allocation[] mOutAllocations;
 
     /**
      * Temporary list to hold onto newly created afids used to match for match list.
@@ -218,17 +236,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     //Let client decide what minimum match percentage is
-    private static final int MIN_MATCH = 90;
+    private static final int MIN_MATCH = 94;
     private static final int DETECTION_PERIOD = 1;
     private static final int MIN_FACE_SIZE = 40;
     private static final int MAX_FACE_SIZE = 300;
     private static final int REQUEST_CAMERA_PERMISSION_RESULT = 0;
     private static final int WRITE_PERMISSION = 100;
-    private static final int MAXPIXELS = 750000;
+    private static final int MAXPIXELS = 1150000;
     private static final int MAXIMAGES = 2;
     private static final float QUALITY_THRESHOLD = 0.65f;
     private static final float BITMAP_SCALE = 0.4f;
-    private static final float BLUR_RADIUS = 7.5f;
+    private static final float BLUR_RADIUS = 20;
     private static final float CROPSCALE = 1.5f;
 
     /**
@@ -243,14 +261,18 @@ public class MainActivity extends AppCompatActivity {
     private float scalingRatio;
     private int bitmapWidth;
     private int bitmapHeight;
+    private int trackerID = -1;
+    private float faceQuality = 0f;
 
 
     private static final String TAG = "main";
 
     private static String afidFile = null;
+    private static String matchListFile = null;
     private String filesDir = null;
     private File afidFolder = null;
-    private File imageFolder = null;
+    private File matchFolder = null;
+    private static File imageFolder = null;
 
     private MyGLRenderer renderer;
 
@@ -280,17 +302,17 @@ public class MainActivity extends AppCompatActivity {
     private ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName className, IBinder service) {
-            // We've bound to LocalService, cast the IBinder and get LocalService instance
+            // We've isBound to LocalService, cast the IBinder and get LocalService instance
             MatchListService.LocalBinder binder = (MatchListService.LocalBinder) service;
             matchListService = binder.getService();
             matchListService.setEngine(engine);
             matchListService.setImageFolder(imageFolder);
-            bound = true;
+            isBound = true;
         }
         @Override
         public void onServiceDisconnected(ComponentName arg0) {
             Log.e(TAG, "onServiceDisconnected");
-            bound = false;
+            isBound = false;
         }
     };
 
@@ -371,13 +393,22 @@ public class MainActivity extends AppCompatActivity {
                 Log.e("debug", "cameraDevice is null. cannot enroll :(");
                 return;
             }
-            draw = false;
+            try {
+                cameraCaptureSession.stopRepeating();
+                //cameraCaptureSession.abortCaptures();
+            } catch (CameraAccessException e) {
+                Log.d(TAG, "setImageReader: gotcha");
+                e.printStackTrace();
+            }
+            imageToBlur = blurImage(textureView.getBitmap());
+            blurView.setImageBitmap(imageToBlur);
+            blurView.setVisibility(View.VISIBLE);
             enroll = true;
-            Log.d(TAG, "onClick: set drawing to false");
-            mode = "enroll";
-            Log.d(TAG, "enrolling...\n");
+            draw = false;
             enrollButton.setVisibility(View.GONE);
             matchButton.setVisibility(View.GONE);
+            Log.d(TAG, "enrolling...\n");
+            mode = "enroll";
             updatePreview();
         }
     };
@@ -395,9 +426,7 @@ public class MainActivity extends AppCompatActivity {
                         recyclerView.setVisibility(View.INVISIBLE);
                         Log.d(TAG, "recycler is invisible");
 
-                        if(!merging) {
-                                /*dummyView = findViewById(R.id.dummyView);
-                                dummyView.setEnabled(false);*/
+                        if(!isMerging) {
 
                             final EditText taskEditText = new EditText(MainActivity.this);
                             AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
@@ -412,16 +441,21 @@ public class MainActivity extends AppCompatActivity {
                             input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL);
                             builder.setView(input);
 
+                            blurView.setVisibility(View.GONE);
+
                             // Set up the buttons
                             builder.setPositiveButton("OK", new DialogInterface.OnClickListener() {
                                 @Override
                                 public void onClick(DialogInterface dialog, int which) {
+
                                     getUserName = input.getText().toString();
+                                    if(getUserName.isEmpty())
+                                        getUserName = "N/A";
                                     runOnUiThread(new Runnable() {
                                         @Override
                                         public void run() {
                                             String welcomeMessage = "Welcome " + getUserName;
-                                            Snackbar.make(findViewById(R.id.myCoordinator), welcomeMessage, Snackbar.LENGTH_SHORT).show();
+                                            Toast.makeText(MainActivity.this, welcomeMessage, Toast.LENGTH_SHORT).show();
                                         }
                                     });
                                     nameProvided = true;
@@ -451,6 +485,7 @@ public class MainActivity extends AppCompatActivity {
                         Toast.makeText(MainActivity.this, "No selection made", Toast.LENGTH_SHORT).show();
                     break;
 
+                // manual --> confirm points to manually find face
                 case "manual":
                     pointsAreOkay = true;
                     confirmButton.hide();
@@ -474,18 +509,22 @@ public class MainActivity extends AppCompatActivity {
             Bitmap bitmap;
             Bitmap greyscaleBitmap;
             AyonixImage frame;
+            //dummy toast to use
+            Toast toast = Toast.makeText(MainActivity.this, "", Toast.LENGTH_LONG);
 
             switch (mode) {
                 case "main":
                     Log.d(TAG, "image available from recording");
+                    Log.d(TAG, "onImageAvailable: reader = "+ imageReader);
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         Log.d(TAG, "mainMode: entered main mode method");
 
                         imageWidth = image.getWidth();
                         imageHeight = image.getHeight();
-                        Log.d(TAG, "onImageAvailable: image widthXheight: "+imageWidth+"X"+imageHeight);
-                        bitmap = YUV_420_888_toRGB(image, imageWidth, imageHeight);
+                        Log.d(TAG, "onImageAvailable: image widthXheight: " + imageWidth + "X" + imageHeight);
+
+                        bitmap = YUV_420_888_toRGB(image, width, height);
                         pixels = new int[bitmap.getWidth() * bitmap.getHeight()];
                         gray = new byte[bitmap.getWidth() * bitmap.getHeight()];
                         image.close();
@@ -498,7 +537,7 @@ public class MainActivity extends AppCompatActivity {
                         //bitmap.getPixels(pixels, 0, height, 0, 0, height, width);
 
                         start = System.currentTimeMillis();
-                        Mat tmp = new Mat (bitmapWidth, bitmapHeight, CvType.CV_8UC1);
+                        Mat tmp = new Mat(bitmapWidth, bitmapHeight, CvType.CV_8UC1);
                         Utils.bitmapToMat(bitmap, tmp);
                         Imgproc.cvtColor(tmp, tmp, Imgproc.COLOR_RGB2GRAY);
                         //there could be some processing
@@ -507,7 +546,7 @@ public class MainActivity extends AppCompatActivity {
                         greyscaleBitmap.getPixels(pixels, 0, greyscaleBitmap.getWidth(),
                                 0, 0, greyscaleBitmap.getWidth(), greyscaleBitmap.getHeight());
                         end = System.currentTimeMillis();
-                        Log.d(TAG, "onImageAvailable: elapsed time to convert to grayscale and get pixels[]: " + (end-start));
+                        Log.d(TAG, "onImageAvailable: elapsed time to convert to grayscale and get pixels[]: " + (end - start));
 
                         start = System.currentTimeMillis();
                         for (int i = 0; i < pixels.length; i++) {
@@ -517,7 +556,24 @@ public class MainActivity extends AppCompatActivity {
                         end = System.currentTimeMillis();
                         Log.d(TAG, "onImageAvailable: elapsed time to convert to byte[]: " + (end - start));
 
-                        Log.d(TAG, "onImageAvailable: bitmap width: " + greyscaleBitmap.getWidth() + ", bitmap height: " + bitmap.getHeight());
+                        /*Image.Plane plane = image.getPlanes()[0];
+                        ByteBuffer buffer = plane.getBuffer();
+                        byte[] data = new byte[buffer.remaining()];
+                        buffer.get(data);
+                        Log.d(TAG, "onImageAvailable: toRGBA");
+                        bitmap = YUVtoRGBA(data, image.getWidth(), image.getHeight());
+                        Log.d(TAG, "onImageAvailable: rotating");
+                        bitmap = rotateImage(bitmap);
+                        Log.d(TAG, "onImageAvailable: toGreyscale");
+                        bitmap = toGreyscale(bitmap);
+                        pixels = new int[bitmap.getWidth() * bitmap.getHeight()];
+                        gray = new byte[bitmap.getWidth() * bitmap.getHeight()];
+                        bitmap.getPixels(pixels, 0, height, 0, 0, height, width);
+                        for (int i = 0; i < pixels.length; i++) {
+                            gray[i] = (byte) pixels[i];
+                        }*/
+
+                        //Log.d(TAG, "onImageAvailable: bitmap width: " + greyscaleBitmap.getWidth() + ", bitmap height: " + bitmap.getHeight());
                         frame = new AyonixImage(imageHeight, imageWidth, false, imageHeight, gray);
                         AyonixFace[] deFaces = new AyonixFace[0];
                         try {
@@ -526,13 +582,75 @@ public class MainActivity extends AppCompatActivity {
                             e.printStackTrace();
                         }
 
-                        Toast toast = Toast.makeText(MainActivity.this, "", Toast.LENGTH_LONG);
                         textView.setText(null);
 
                         foundFace = false;
-                        faceToFollow = null;
+
 
                         for (AyonixFace face : deFaces) {
+
+                            String info = (
+                                    "Face[" + (face.trackerCount) + "] : \n" +
+                                    "       " + (face.gender > 0 ? "female" : "male") + "\n" +
+                                    "       " + (int) face.age + "y\n" +
+                                    "       " + (face.expression.smile > 0.1 ? "smiling" : "no smile") + "\n" + //face.expression.smile < -0.9 ? "frowning" : "neutral") + "\n" +
+                                    "       mouth open: " + Math.round(face.expression.mouthOpen * 100) + "%" + "\n" +
+                                    "       quality: " + Math.round(face.quality * 100) + "%" + "\n" +
+                                    "       roll: " + (int) (face.roll) + "\n" +
+                                    "       pitch: " + (int) (face.pitch) + "\n" +
+                                    "       yaw: " + (int) (face.yaw) + "\n" +
+                                    "       tracker id: " + face.trackerId);
+                            System.out.println(info);
+                            followFace(face);
+
+                            if (trackerID == -1) {
+                                Log.d(TAG, "onImageAvailable: setting tracker to " + face.trackerId);
+                                trackerID = face.trackerId;
+
+                            } else {
+                                if (trackerID == face.trackerId) {
+                                        if ((int) face.roll < -20 || (int) face.roll > 20) {
+                                            showAToast("Please straighten your head upright.", toast);
+
+                                        } else if ((int) face.yaw < -13 || (int) face.yaw > 13) {
+                                            showAToast("Please face the camera.", toast);
+
+                                        } else {
+                                            foundFace = true;
+                                            //b_followFace = true;
+
+                                            if (face.location.y > 0 && face.location.x > 0) {
+                                                //check if scaled coordinates are within the views boundaries
+                                                int x = (face.location.x - Math.round((face.location.w / 2f) * (CROPSCALE - 1)) > 0) ?
+                                                        face.location.x - Math.round((face.location.w / 2f) * (CROPSCALE - 1)) :
+                                                        face.location.x;
+                                                int y = (face.location.y - Math.round((face.location.h / 2f) * (CROPSCALE - 1)) > 0) ?
+                                                        face.location.y - Math.round((face.location.h / 2f) * (CROPSCALE - 1)) :
+                                                        face.location.y;
+                                                int w = Math.round(face.location.w * CROPSCALE);
+                                                int h = Math.round(face.location.h * CROPSCALE);
+                                                if ((x + w < bitmap.getWidth()) && (y + h <= bitmap.getHeight())) {
+                                                    Log.d(TAG, "onImageAvailable: cropping image and adding to faces to match");
+                                                    if(!b_liveMatching) {
+                                                        Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, x, y, w, h);
+                                                        faceToMatchBitmap = croppedBitmap;
+                                                        faceToFollow = face;
+                                                        b_checkMatched = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                } else {
+                                    //TODO need to handle case of more than face in frame
+                                    Log.d(TAG, "onImageAvailable: setting tracker from" + trackerID +
+                                            " to " + face.trackerId);
+                                    trackerID = face.trackerId;
+                                    faceQuality = face.quality;
+                                }
+                            }
+
+
+                        /*for (AyonixFace face : deFaces) {
                             if (face != null) {
                                 if ((int) face.roll < -20 || (int) face.roll > 20) {
                                     showAToast("Please straighten your head upright.", toast);
@@ -586,11 +704,11 @@ public class MainActivity extends AppCompatActivity {
                                             "       roll: " + (int) (face.roll) + "\n" +
                                             "       pitch: " + (int) (face.pitch) + "\n" +
                                             "       yaw: " + (int) (face.yaw) + "\n" +
-                                            "       location x:" + face.location.x + ", y:" + face.location.y + ", w:" + face.location.w + " , h:" + face.location.h + "\n" +
-                                            "       muglocation x:" + face.mugLocation.x + ", y:" + face.mugLocation.y + ", w:" + face.mugLocation.w + " , h:" + face.mugLocation.h + "\n\n");
+                                            "       tracker id: " + face.trackerId);
                                     System.out.println(info);
                                 }
                             }
+                        }*/
                         }
                     }
                     if(image != null)
@@ -605,10 +723,6 @@ public class MainActivity extends AppCompatActivity {
                         try {
                             // start timer && get image
                             start = System.currentTimeMillis();
-
-                        /*// blur
-                        Bitmap blurryBitmap = BlurBuilder.blur(textureView);
-                        textureView.setBackground(new BitmapDrawable(getResources(), blurryBitmap));*/
 
                             // get image dimensions
                             width = image.getWidth();
@@ -627,7 +741,6 @@ public class MainActivity extends AppCompatActivity {
                             bitmap.getPixels(pixels, 0, image.getHeight(), 0, 0, image.getHeight(), image.getWidth());
                             image.close();
 
-                            blur(MainActivity.this, bitmap);
                             end = System.currentTimeMillis();
                             Log.d(TAG, "Elapsed time to get image and extract pixels: " + (end - start));
 
@@ -705,12 +818,16 @@ public class MainActivity extends AppCompatActivity {
                                                         Snackbar.LENGTH_LONG).show();
                                             } else {
                                                 // crop colored image
-                                                int x = face.location.x - Math.round((face.location.w / 2f) * (CROPSCALE - 1));
-                                                int y = face.location.y - Math.round((face.location.h / 2f) * (CROPSCALE - 1));
-                                                int w = Math.round(face.location.w * CROPSCALE);
-                                                int h = Math.round(face.location.h * CROPSCALE);
-                                                //check if scaled coordinates are within the views boundaries
-                                                if (x + w < bitmap.getWidth()) {
+                                                int x = (face.location.x-Math.round((face.location.w/2f)*(CROPSCALE-1)) > 0) ?
+                                                        face.location.x-Math.round((face.location.w/2f)*(CROPSCALE-1)) :
+                                                        face.location.x;
+                                                int y = (face.location.y-Math.round((face.location.h/2f)*(CROPSCALE-1)) > 0) ?
+                                                        face.location.y-Math.round((face.location.h/2f)*(CROPSCALE-1)) :
+                                                        face.location.y;
+                                                Log.d(TAG, "onImageAvailable: x = "+x);
+                                                int w = Math.round(face.location.w*CROPSCALE);
+                                                int h = Math.round(face.location.h*CROPSCALE);
+                                                if((x+w < bitmap.getWidth()) && (y+h <= bitmap.getHeight())) {
                                                     Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, x, y, w, h);
                                                     facesToShow.add(face);
                                                     bitmapsToShow.add(croppedBitmap);
@@ -728,7 +845,6 @@ public class MainActivity extends AppCompatActivity {
                                                         runOnUiThread(new Runnable() {
                                                             @Override
                                                             public void run() {
-                                                                //recyclerView.setBackgroundColor(5091150);
                                                                 mAdapter.notifyDataSetChanged();
                                                                 recyclerView.setVisibility(View.VISIBLE);
                                                                 Log.d(TAG, "recycler is visible");
@@ -745,7 +861,7 @@ public class MainActivity extends AppCompatActivity {
                                                             return;
                                                         }
 
-                                                        while (!nameProvided && !merging && !cancel) {
+                                                        while (!nameProvided && !isMerging && !cancel) {
                                                             /* user must provide name unless already enrolled*/
                                                         }
                                                         if (nameProvided)
@@ -759,13 +875,13 @@ public class MainActivity extends AppCompatActivity {
                                                         Log.d(TAG, "Creating AFID");
                                                         afidi = engine.CreateAfid(mAdapter.getSelected());
 
-                                                        if (merging) {
+                                                        if (isMerging) {
                                                             Log.d(TAG, "Merging AFIDs...");
                                                             afidi = engine.MergeAfids(afidi, mAdapter.getMatchAfid());
                                                         }
 
                                                         totalSize += afidi.length;
-                                                        save(afidi, mAdapter.getSelected(), mAdapter.getSelectedBitmap(), false);
+                                                        save(afidi, mAdapter.getSelected(), mAdapter.getSelectedBitmap());
                                                         mode = "main";
                                                         Log.i(TAG, "Created " + updatedFaces.length + " afids\n");
                                                         Log.i(TAG, "  Total " + totalSize + " bytes\n");
@@ -796,14 +912,7 @@ public class MainActivity extends AppCompatActivity {
                         } catch (AyonixException e) {
                             e.printStackTrace();
                         } finally {
-                            if (image != null) {
-                                image.close();
-                            }
-                            try {
-                                cameraCaptureSession.abortCaptures();
-                            } catch (CameraAccessException e) {
-                                e.printStackTrace();
-                            }
+                            if (image != null) { image.close(); }
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
@@ -814,145 +923,26 @@ public class MainActivity extends AppCompatActivity {
                             });
                             Log.d(TAG, "onImageAvailable: leaving enrollment");
                             facesToShow.clear();
-                            draw = true;
-                            Log.d(TAG, "onImageAvailable: draw true");
                             mode = "main";
                             updatePreview();
                         }
-                    }
-                    break;
-
-                case "match":
-                    Log.d(TAG, "image available from recording");
-                    locked = true;
-                    image = null;
-                    System.out.println("trying to process image!!");
-                    try {
-                        image = reader.acquireLatestImage();
-                        Log.d(TAG, "onImageAvailable: got image!");
-                        width = image.getWidth();
-                        height = image.getHeight();
-                        gray = new byte[width * height];
-
-                        bitmap = YUV_420_888_toRGB(image, width, height);
-                        image.close();
-                        pixels = new int[bitmap.getWidth() * bitmap.getHeight()];
-
-                        bitmap = rotateImage(bitmap);
-                        Log.d(TAG, "rotated image");
-
-                        bitmap.getPixels(pixels, 0, height, 0, 0, height, width);
-                        Log.d(TAG, "pixelated");
-
-                        for (int i = 0; i < pixels.length; i++) {
-                            //gray[i] = (byte) (255 * Color.luminance(pixels[i]));
-                            gray[i] = (byte) pixels[i];
-                        }
-
-                        frame = new AyonixImage(height, width, false, height, gray);
-                        Log.d(TAG, "got frame: " + frame);
-
-                        AyonixFace[] updatedFaces = faceTracker.UpdateTracker(frame);
-
-                        // no faces were found
-                        if (updatedFaces.length <= 0) {
-                            updatedFaces = new AyonixFace[1];
-                            confirmMode = "manual";
-                            if(!faceNotDetected(frame, updatedFaces)){
-                                if (cancel) {
-                                    Log.d(TAG, "onImageAvailable: cancelled enrollment");
-                                    cancel = false;
-                                }
-                                else
-                                    Log.d(TAG, "onImageAvailable: something went wrong detecting faces");
-                                return;
-                            }
-                            if (updatedFaces[0] == null) {
-                                mode = "main";
-                                Log.d(TAG, "onImageAvailable: enrollment failed");
-                                updatePreview();
-                                return;
-                            }
-                            Log.d(TAG, "onImageAvailable: face found");
-                        }
-
-                        Vector<byte[]> afids;
-                        for (int i = 0; i < updatedFaces.length; i++) {
-                            if (gotFace)
-                                gotFace = false;
-
-                            byte[] afidData = engine.CreateAfid(updatedFaces[i]);
-
-                            afids = new Vector<>(masterList.keySet());
-                            float[] scores = new float[afids.size()];
-                            engine.MatchAfids(afidData, afids, scores);
-
-                            for(int j = 0; j < scores.length; j++){
-                                if (100 * scores[j] >= MIN_MATCH) {
-                                    EnrolledInfo info = masterList.get(afids.get(j));
-                                    Bitmap bm = BitmapFactory.decodeFile(info.getMugshots().get(0).getAbsolutePath());
-                                    bm = MainActivity.scaleBitmap(bm, 350, true);
-                                    final Bitmap finalBm = bm;
-                                    runOnUiThread(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            matchedMug.setImageBitmap(finalBm);
-                                        }
-                                    });
-                                    bm.recycle();
-                                    finalBm.recycle();
-                                    Animation animation = new TranslateAnimation(0, 0, -(matchedLayout.getHeight()), 0);
-                                    animation.setDuration(300);
-                                    //animation.setFillAfter(true);
-                                    mBackgroundHandler.postDelayed(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            Animation animation = new TranslateAnimation(0, 0, 0, -(matchedLayout.getHeight()));
-                                            animation.setDuration(300);
-                                            //animation.setFillAfter(true);
-                                        }
-                                    }, 4000);
-                                    final String print = (info.getName() + "\n"
-                                            + info.getAge()+"y "+ info.getGender() );
-                                    runOnUiThread(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            //matchedInfo.setText(print);
-                                            Snackbar.make(findViewById(R.id.myCoordinator), "Match successful.", Snackbar.LENGTH_LONG).show();
-                                            enrollButton.setVisibility(View.VISIBLE);
-                                            matchButton.setVisibility(View.VISIBLE);
-                                        }
-                                    });
-
-                                    Log.i("info", Math.round(100 * scores[j]) + "%" + "match with Afid[" + (i + 1) + "]" + "\n");
-                                    mode = "main";
-                                    updatePreview();
-                                    return;
-                                }
-                            }
-                        }
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                Snackbar.make(findViewById(R.id.myCoordinator), "No matches.", Snackbar.LENGTH_LONG).show();
-                            }
-                        });
-                        Log.i("info", "Done\n");
-                    } catch (AyonixException e) {
-                        e.printStackTrace();
-                    } finally {
-                        image.close();
-                        mode = "main";
+                    } else {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
                                 enrollButton.setVisibility(View.VISIBLE);
                                 matchButton.setVisibility(View.VISIBLE);
+                                recyclerView.setVisibility(View.INVISIBLE);
                             }
                         });
+                        Log.d(TAG, "onImageAvailable: leaving enrollment");
+                        facesToShow.clear();
+                        mode = "main";
                         updatePreview();
                     }
-                break;
+                    break;
+                default:
+                    Log.d(TAG, "onImageAvailable: switched to default");
             }
         }
     };
@@ -964,16 +954,13 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
             Log.d(TAG, "switching intents...");
-            if(intent.getFlags() == Intent.FLAG_ACTIVITY_NEW_TASK){
-                System.out.println("unlocking...");
-                KeyguardManager keyguardManager = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
-                keyguardManager.requestDismissKeyguard(MainActivity.this, null);
-            }
             switch (intent.getAction()) {
                 case ("unlock"):
-                    System.out.println("unlocking...");
+                    Log.d(TAG, "onReceive: unlocking...");
                     KeyguardManager keyguardManager = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
                     keyguardManager.requestDismissKeyguard(MainActivity.this, null);
+                    if(textureView.isAvailable())
+                        openCamera(textureView.getWidth(), textureView.getHeight());
                     break;
                 case ("restart"):
                     System.out.println("restarting service...");
@@ -992,8 +979,8 @@ public class MainActivity extends AppCompatActivity {
                     Log.d(TAG, "toggling..");
                     confirmButton.show();
                     cancelButton.show();
-                    merging = true;
-                    Log.d(TAG, "onReceive: merging is true");
+                    isMerging = true;
+                    Log.d(TAG, "onReceive: isMerging is true");
                     break;
                 case ("removeSelected"):
                     Log.d(TAG, "onReceive: remove button intent received");
@@ -1006,19 +993,9 @@ public class MainActivity extends AppCompatActivity {
 
     public Activity getContext(){ return MainActivity.this; }
 
-    public boolean unlockDevice(){
-        System.out.println("unlocking...");
-        return unlockHelper();
-    }
-
-    private boolean unlockHelper(){
-        KeyguardManager keyguardManager = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
-        keyguardManager.requestDismissKeyguard(MainActivity.this, null);
-        return true;
-    }
-
     private void followFace(AyonixFace face) {
-        if(draw && b_followFace && face != null) {
+        if(draw && face != null) {
+            Log.d(TAG, "followFace: following face");
             float currMugArea = face.location.w*face.location.h;
 
             if(prevMugArea == 0.0f) {
@@ -1034,45 +1011,48 @@ public class MainActivity extends AppCompatActivity {
                 renderer.setScale(scalingRatio);
             }
             renderer.setAngle(face.roll);
+            renderer.setColor(checkMatched(face));
             renderer.setTranslateX((2.0f * (bitmapWidth  - face.location.x - (face.location.w/2.0f)) / bitmapWidth)  - 1.0f);  //?????????
             renderer.setTranslateY((2.0f * (bitmapHeight - face.mugLocation.y - (face.location.h/2.0f)) / bitmapHeight) - 1.0f);
-            glSurfaceView.requestRender();
         }
-        else
-            glSurfaceView.requestRender();
+        glSurfaceView.requestRender();
         b_followFace = false;
     }
 
-    private void checkMatched(AyonixFace face){
+    private float[] checkMatched(AyonixFace face){
+        boolean matched = false;
         if(b_checkMatched) {
             final Vector<byte[]> afids = new Vector<>(masterList.keySet());
             float[] scores = new float[afids.size()];
             try {
                 byte[] afid = engine.CreateAfid(face);
+                Log.d(TAG, "checkMatched: matching against master");
+                Log.d(TAG, "checkMatched: afid list size = "+afids.size());
                 engine.MatchAfids(afid, afids, scores);
                 for (int j = 0; j < scores.length; j++) {
                     if (scores[j] * 100 >= MainActivity.MIN_MATCH) {
-                        setColor(face.gender, true);
                         minQuality = 0.5f;
                         b_checkMatched = false;
-                        return;
+                        matched = true;
                     }
                 }
-                setColor(face.gender, false);
             } catch (AyonixException e) { e.printStackTrace(); }
             finally {
                 b_checkMatched = false;
                 minQuality = 0.5f;
             }
         }
+        return setColor(face.gender, matched);
     }
 
-    private void setColor(float gender, boolean match){
+    private float[] setColor(float gender, boolean match){
                                           // green = match
         float[] color = ((match ? new float[]{0f, 153f, 0f, 1f} :
                             // pink = female                   // blue = male
                 gender > 0 ? new float[]{255f, 0f, 247f, 1f} : new float[]{0.0f, 0.0f, 255.0f, 1f}));
-        renderer.setColor(color);
+        return color;
+        /*renderer.setColor(color);
+        glSurfaceView.requestRender();*/
     }
 
     private void setMasterList(){
@@ -1093,7 +1073,25 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public static boolean getDraw(){ return draw; }
+    private void setMatchList(){
+        ObjectInputStream ois = null;
+        try {
+            ois = new ObjectInputStream(new FileInputStream(matchListFile));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        if(ois == null)
+            matchList = new LinkedHashMap<>();
+        else {
+            try {
+                matchList = (LinkedHashMap<byte[], EnrolledInfo>) ois.readObject();
+            } catch (ClassNotFoundException | IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public boolean getDraw(){ return draw; }
 
     public void showAToast (String st, Toast toast){ //"Toast toast" is declared in the class
         if (toast.getView().isShown()) {
@@ -1201,7 +1199,7 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(MainActivity.this, "Up", Toast.LENGTH_SHORT).show();
         Log.d(TAG, "onSwipeUp: touching works");
 
-        //TODO show match history info ??
+        // add whatever functionality you like
     }
 
     public boolean singleTapHelper(MotionEvent e){
@@ -1236,8 +1234,9 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         mode = "main";
 
-        final Window win = getWindow();
-        win.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+        /*getWindow().addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);*/
 
         OpenCVLoader.initDebug();
 
@@ -1247,8 +1246,12 @@ public class MainActivity extends AppCompatActivity {
         afidFile = afidFolder.toString() + "/afidlist";
         imageFolder = new File(filesDir + "/images");
         imageFolder.mkdirs();
+        matchFolder = new File(filesDir + "/matches");
+        matchFolder.mkdirs();
+        matchListFile = matchFolder.toString() + "/matchlist";
 
         setMasterList();
+        //setMatchList();
 
         //set up local broadcasts to either unlock phone at lock screen, or restart service when terminated
         IntentFilter filter = new IntentFilter("unlock");
@@ -1263,7 +1266,9 @@ public class MainActivity extends AppCompatActivity {
         setSupportActionBar(toolbar);
         setTitle("Welcome to Ayonix Face Tracker.");
 
+        // set up opengl surface view and renderer
         renderer = new MyGLRenderer();
+        renderer.setContext(this);
         glSurfaceView = findViewById(R.id.gl_surface_view);
         glSurfaceView.setZOrderOnTop(true);
         glSurfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0);
@@ -1300,11 +1305,15 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        blurView = findViewById(R.id.blurview);
+        assert blurView != null;
+        blurView.setVisibility(View.GONE);
+
         matchedLayout = findViewById(R.id.matchedLayout);
         assert matchedLayout != null;
 
         recyclerView = findViewById(R.id.recycleView);
-        recyclerView.setHasFixedSize(true); //TODO false????
+        recyclerView.setHasFixedSize(true);
         recyclerView.addItemDecoration(new DividerItemDecoration(this, LinearLayoutManager.VERTICAL));
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setVisibility(View.VISIBLE);
@@ -1401,7 +1410,7 @@ public class MainActivity extends AppCompatActivity {
                 enrolledAdapter.setFacesToEnroll(masterList);
                 enrolledAdapter.notifyDataSetChanged();
                 removeButton.setVisibility(View.INVISIBLE);
-                save(null, null, null, true);
+                saveMasterList();
                 if(masterList.isEmpty())
                     swipeLeftHelper();
             }
@@ -1496,7 +1505,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        registerService();
     }
 
     public static boolean getFoundFace(){ return foundFace; }
@@ -1523,7 +1531,6 @@ public class MainActivity extends AppCompatActivity {
                 cancelButton.show();
             }
         });
-        //recyclerView.setOnTouchListener(handleTouch);
 
         textView.append("Tap two points (both eyes) to detect face, or cancel.\n");
         while (((point1.x == 0.0 && point1.y == 0.0) || (point2.x == 0.0 && point2.y == 0.0)) && !cancel) {
@@ -1555,7 +1562,6 @@ public class MainActivity extends AppCompatActivity {
                 e1.printStackTrace();
             }
             if (faceArray[0] == null) {
-                //recyclerView.setOnTouchListener(null);
                 textView.append("no faces were found :( \n");
                 runOnUiThread(new Runnable() {
                     @Override
@@ -1574,73 +1580,115 @@ public class MainActivity extends AppCompatActivity {
         return false;
     }
 
-    private void save(byte[] afid, AyonixFace face, Bitmap mugshot, boolean quickSave) {
+    /**
+     * quickly save master list to app`s internal memory
+     */
+    private void saveMasterList(){
+        if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED) {
+            try {
+                ObjectOutputStream outputStream = new ObjectOutputStream(new FileOutputStream(afidFile));
+                outputStream.writeObject(masterList);
+                outputStream.flush();
+                outputStream.close();
+                Log.d(TAG, "quick save successful.");
+            } catch (IOException e) {
+                Log.d(TAG, "save: quick save failed");
+                e.printStackTrace();
+            }
+        } else {
+            if (shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE))
+                Toast.makeText(MainActivity.this, "App requires access to camera", Toast.LENGTH_LONG).show();
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, WRITE_PERMISSION);
+            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED)
+                saveMasterList();
+            else
+                Toast.makeText(MainActivity.this, "Saving failed. Permission denied.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /**
+     * saves match list to app`s internal memory
+     */
+    private void saveMatchList(){
+        if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED) {
+            try {
+                ObjectOutputStream outputStream = new ObjectOutputStream(new FileOutputStream(matchListFile));
+                outputStream.writeObject(matchList);
+                outputStream.flush();
+                outputStream.close();
+                Log.d(TAG, "quick save successful.");
+            } catch (IOException e) {
+                Log.d(TAG, "save: quick save failed");
+                e.printStackTrace();
+            }
+        } else {
+            if (shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE))
+                Toast.makeText(MainActivity.this, "App requires access to camera", Toast.LENGTH_LONG).show();
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, WRITE_PERMISSION);
+            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED)
+                saveMatchList();
+            else
+                Toast.makeText(MainActivity.this, "Saving failed. Permission denied.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void save(byte[] afid, AyonixFace face, Bitmap mugshot) {
         if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
-            if(quickSave){
-                try {
-                    // save masterlist to app internal memory
-                    ObjectOutputStream outputStream = new ObjectOutputStream(new FileOutputStream(afidFile));
-                    outputStream.writeObject(masterList);
-                    outputStream.flush();
-                    outputStream.close();
-                    Log.d(TAG, "quick save successful.");
-                } catch (IOException e){
-                    Log.d(TAG, "save: quick save failed");
-                    e.printStackTrace();
-                }
-            } else {
-                ArrayList<File> files = new ArrayList<>();
-                try {
+            ArrayList<File> files = new ArrayList<>();
+            try {
 
-                    // save mugshot into .jpg
-                    File jpegFile = new File(imageFolder, "/" + System.currentTimeMillis() + ".jpg");
-                    FileOutputStream out = new FileOutputStream(jpegFile);
-                    //Bitmap bm = bitmapToImage(face);
-                    mugshot.compress(Bitmap.CompressFormat.JPEG, 90, out);
-                    out.flush();
-                    out.close();
+                // save mugshot into .jpg
+                File jpegFile = new File(imageFolder, "/" + System.currentTimeMillis() + ".jpg");
+                FileOutputStream out = new FileOutputStream(jpegFile);
+                //Bitmap bm = bitmapToImage(face);
+                mugshot.compress(Bitmap.CompressFormat.JPEG, 90, out);
+                out.flush();
+                out.close();
 
-                    // add image to (if) already existing image list
-                    if (merging) {
-                        files = masterList.get(mAdapter.getMatchAfid()).getMugshots();
-                        masterList.remove(mAdapter.getMatchAfid());
-                        mAdapter.resetPosition();
-                        files.add(0, jpegFile);
-                    } else
-                        files.add(jpegFile);
+                // add image to (if) already existing image list
+                if (isMerging) {
+                    files = masterList.get(mAdapter.getMatchAfid()).getMugshots();
+                    masterList.remove(mAdapter.getMatchAfid());
+                    mAdapter.resetPosition();
+                    files.add(0, jpegFile);
+                } else
+                    files.add(jpegFile);
 
-                    // update masterlist and data for recycler view
-                    masterList.put(afid, new EnrolledInfo(files, getUserName,
-                            (face.gender > 0 ? "Female" : "Male"), (int) face.age, face.quality));
-                    enrolledAdapter.setFacesToEnroll(masterList);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            enrolledAdapter.notifyDataSetChanged();
-                        }
-                    });
+                // update masterlist and data for recycler view
+                masterList.put(afid, new EnrolledInfo(files, getUserName,
+                        (face.gender > 0 ? "Female" : "Male"), (int) face.age, face.quality));
+                enrolledAdapter.setFacesToEnroll(masterList);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        enrolledAdapter.notifyDataSetChanged();
+                    }
+                });
 
-                    // save masterlist to app internal memory
-                    ObjectOutputStream outputStream = new ObjectOutputStream(new FileOutputStream(afidFile));
-                    outputStream.writeObject(masterList);
-                    outputStream.flush();
-                    outputStream.close();
-                    Log.d(TAG, "saved successful.");
-                    if (merging) {
-                        Snackbar.make(findViewById(R.id.myCoordinator), "Merged.", Snackbar.LENGTH_LONG).show();
-                        merging = false;
-                    } else
-                        Snackbar.make(findViewById(R.id.myCoordinator), "Enrolled.", Snackbar.LENGTH_LONG).show();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                // save masterlist to app internal memory
+                ObjectOutputStream outputStream = new ObjectOutputStream(new FileOutputStream(afidFile));
+                outputStream.writeObject(masterList);
+                outputStream.flush();
+                outputStream.close();
+                Log.d(TAG, "saved successful.");
+                if (isMerging) {
+                    Snackbar.make(findViewById(R.id.myCoordinator), "Merged.", Snackbar.LENGTH_LONG).show();
+                    isMerging = false;
+                } else
+                    Snackbar.make(findViewById(R.id.myCoordinator), "Enrolled.", Snackbar.LENGTH_LONG).show();
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         } else {
             if (shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE))
                 Toast.makeText(MainActivity.this, "App requires access to camera", Toast.LENGTH_LONG).show();
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, WRITE_PERMISSION);
             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED)
-                save(afid, face, mugshot, false);
+                save(afid, face, mugshot);
             else
                 Toast.makeText(MainActivity.this, "Saving failed. Permission denied.", Toast.LENGTH_LONG).show();
         }
@@ -1675,6 +1723,7 @@ public class MainActivity extends AppCompatActivity {
             imageReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, MAXIMAGES);
             imageReader.setOnImageAvailableListener(onImageAvailableListener, mBackgroundHandler);
         } catch (CameraAccessException e) {
+            Log.d(TAG, "setImageReader: gotcha");
             e.printStackTrace();
         }
     }
@@ -1715,43 +1764,59 @@ public class MainActivity extends AppCompatActivity {
 
     public boolean getEnroll(){ return enroll; }
 
-    private void registerService() {
-        //start foreground service for lock screen
-        serviceIntent = new Intent(MainActivity.this, AyonixUnlockService.class);
-        serviceIntent.setAction("ACTION_START_FOREGROUND_SERVICE");
-        startService(serviceIntent);
+    private void registerMatchListService() {
+        Intent matchListIntent = new Intent(this, MatchListService.class);
+        bindService(matchListIntent, connection, Context.BIND_AUTO_CREATE);
+        System.out.println("sent match list service intent.");
+    }
 
-        Intent intent = new Intent(this, MatchListService.class);
-        bindService(intent, connection, Context.BIND_AUTO_CREATE);
-        System.out.println("sent start service intent.");
+    private void registerUnlockService(){
+        //start foreground service for lock screen
+        if(serviceIntent == null) {
+            serviceIntent = new Intent(MainActivity.this, AyonixUnlockService.class);
+            serviceIntent.setAction("ACTION_START_FOREGROUND_SERVICE");
+            startService(serviceIntent);
+            Log.d(TAG, "registerUnlockService: sent unlock service intent");
+        }
     }
 
     @Override
     public void onResume() {
         Log.e(TAG, "onResume");
         super.onResume();
-        mode = "main";
+        isAwake = true;
         startBackgroundThread();
+        registerMatchListService();
+        if(unlockServiceOff) {
+            registerUnlockService();
+            unlockServiceOff = false;
+        }
+
+        // When the screen is turned off and turned back on, the SurfaceTexture is already
+        // available, and "onSurfaceTextureAvailable" will not be called. In that case, we can open
+        // a camera and start preview from here (otherwise, we wait until the surface is ready in
+        // the SurfaceTextureListener).
         if (textureView.isAvailable()) {
             textureView.setSurfaceTextureListener(textureListener);
-            openCamera(textureView.getWidth(), textureView.getHeight());
+            //openCamera(textureView.getWidth(), textureView.getHeight());
+            Log.d(TAG, "onResume: opened camera :)");
         } else {
             textureView.setSurfaceTextureListener(textureListener);
         }
         glSurfaceView.onResume();
-        awake = true;
-        registerService();
     }
 
     @Override
     public void onPause() {
         Log.e(TAG, "onPause");
-        textureView.setSurfaceTextureListener(null);
         closeCamera();
         stopBackgroundThread();
+        unbindService(connection);
+        saveMasterList();
+        //saveMatchList();
         super.onPause();
         glSurfaceView.onPause();
-        awake = false;
+        isAwake = false;
     }
 
     public void onStop(){
@@ -1793,6 +1858,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onOpened(CameraDevice camera) {
             //This is called when the camera is open
+            mCameraOpenCloseLock.release();
             cameraDevice = camera;
             Log.d(TAG, "Camera connection established: " + cameraDevice);
             startPreview();
@@ -1800,13 +1866,17 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public void onDisconnected(CameraDevice camera) {
+            Log.d(TAG, "onDisconnected: camera was disconnected");
             cameraDevice = camera;
+            mCameraOpenCloseLock.release();
             closeCamera();
         }
 
         @Override
         public void onError(CameraDevice camera, int error) {
+            Log.d(TAG, "onError: error with camera");
             cameraDevice = camera;
+            mCameraOpenCloseLock.release();
             closeCamera();
         }
     };
@@ -1945,25 +2015,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public static Bitmap blur(Context context, Bitmap image) {
-        int width = Math.round(image.getWidth() * BITMAP_SCALE);
-        int height = Math.round(image.getHeight() * BITMAP_SCALE);
-
-        Bitmap inputBitmap = Bitmap.createScaledBitmap(image, width, height, false);
-        Bitmap outputBitmap = Bitmap.createBitmap(inputBitmap);
-
-        RenderScript rs = RenderScript.create(context);
-        ScriptIntrinsicBlur theIntrinsic = ScriptIntrinsicBlur.create(rs, Element.U8_4(rs));
-        Allocation tmpIn = Allocation.createFromBitmap(rs, inputBitmap);
-        Allocation tmpOut = Allocation.createFromBitmap(rs, outputBitmap);
-        theIntrinsic.setRadius(BLUR_RADIUS);
-        theIntrinsic.setInput(tmpIn);
-        theIntrinsic.forEach(tmpOut);
-        tmpOut.copyTo(outputBitmap);
-
-        return outputBitmap;
-    }
-
     private void setupCamera(int width, int height) {
         CameraManager manager = (CameraManager) this.getSystemService(Context.CAMERA_SERVICE);
         try {
@@ -2005,6 +2056,7 @@ public class MainActivity extends AppCompatActivity {
             System.out.println("width: " + rotatedWidth + " , height: " + rotatedHeight);
             System.out.println("image dimension: " + imageDimension);
         } catch (CameraAccessException e) {
+            Log.d(TAG, "setImageReader: gotcha");
             e.printStackTrace();
         }
     }
@@ -2017,6 +2069,8 @@ public class MainActivity extends AppCompatActivity {
         try {
             setupCamera(width, height);
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                if(!mCameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS))
+                    throw new RuntimeException("Time out waiting to lock camera opening.");
                 manager.openCamera(cameraId, stateCallback, mBackgroundHandler);
                 Log.d(TAG, "camera opened.");
             } else {
@@ -2024,8 +2078,9 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, "App requires access to camera", Toast.LENGTH_SHORT).show();
                 requestPermissions(new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION_RESULT);
             }
-        } catch (CameraAccessException e) {
+        } catch (CameraAccessException | InterruptedException e) {
             Toast.makeText(this, "Cannot access the camera.", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "setImageReader: gotcha");
             this.finish();
         }
     }
@@ -2090,6 +2145,7 @@ public class MainActivity extends AppCompatActivity {
         SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
         surfaceTexture.setDefaultBufferSize(imageDimension.getWidth(), imageDimension.getHeight());
         setImageReader();
+        Log.d(TAG, "startPreview: image reader set");
         previewSurface = new Surface(surfaceTexture);
         outputSurfaces.add(previewSurface);
         outputSurfaces.add(imageReader.getSurface());
@@ -2099,6 +2155,8 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onConfigured(CameraCaptureSession session) {
                     Log.d(TAG, "onConfigured: configured!!!!");
+                    if(null == cameraDevice)
+                        return;
                     cameraCaptureSession = session;
                     updatePreview();
                 }
@@ -2115,8 +2173,10 @@ public class MainActivity extends AppCompatActivity {
                     Log.d(TAG, session.toString() + " session was closed :(");
                     startPreview();
                 }
+
             }, mBackgroundHandler);
         } catch (CameraAccessException e) {
+            Log.d(TAG, "setImageReader: gotcha");
             e.printStackTrace();
             e.getReason();
         }
@@ -2131,6 +2191,13 @@ public class MainActivity extends AppCompatActivity {
                 case "main":
                     Log.d(TAG, "main mode");
                     locked = false;
+                    draw = true;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            blurView.setVisibility(View.GONE);
+                        }
+                    });
                     if(cameraCaptureSession == null)
                         startPreview();
                     //cameraCaptureSession.abortCaptures();
@@ -2140,44 +2207,53 @@ public class MainActivity extends AppCompatActivity {
                         captureRequestBuilder.addTarget(previewSurface);
                     if(imageReader.getSurface() != null)
                         captureRequestBuilder.addTarget(imageReader.getSurface());
+                    Log.d(TAG, "updatePreview: tryna setrepeatingrequest...");
                     cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, mBackgroundHandler);
                     timer = new Timer();
-                    timer.schedule(new TimerTask() {
+                    /*timer.schedule(new TimerTask() {
                         @Override
                         public void run() {
-                            if(awake) checkMatched(faceToMatch_opengl);
+                            Log.d(TAG, "run: is awake = " + isAwake);
+                            if(isAwake) checkMatched(faceToMatch_opengl);
                         }
-                    }, 0, 1200);
-                    timer.schedule(new TimerTask() {
+                    }, 0, 1200);*/
+                    /*timer.schedule(new TimerTask() {
                         @Override
                         public void run() {
-                            if(awake) followFace(faceToFollow);
+                            if(isAwake) {
+                                followFace(faceToFollow);
+                            }
                         }
-                    }, 0, 250);
+                    }, 0, 200);*/
                     timer.schedule(new TimerTask() {
                         @Override
                         public void run() {
-                            if(awake && bound) {
-                                Log.d(TAG, "run: bound worked");
+                            Log.d(TAG, "run: trying to run matching");
+                            if(isAwake && isBound && !b_liveMatching && faceToFollow != null) {
+                                Log.d(TAG, "run: isBound worked");
+                                Log.d(TAG, "run: matching is running ");
                                 b_liveMatching = true;
-                                Iterator iterator = facesToMatch.iterator();
-
                                 matchListService.setMasterList(masterList);
                                 matchListService.setMatchList(matchList);
-                                matchListService.liveMatching(iterator, bitmapsToMatch);
-                                facesToMatch.clear();
-                                bitmapsToMatch.clear();
-                                Log.d(TAG, "run: match list size after matching is "+matchList.size());
-                                matchedPeopleAdapter.setMatchList(matchList);
-                                runOnUiThread(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        matchedPeopleAdapter.notifyDataSetChanged();
-                                    }
-                                });
+                                if(matchListService.liveMatchingv2(faceToFollow, faceToMatchBitmap) == 1) {
+                                    matchList = matchListService.getMatchList();
+                                    Log.d(TAG, "run: match list size after matching is " + matchList.size());
+                                    matchedPeopleAdapter.setMasterList(masterList);
+                                    matchedPeopleAdapter.setMatchList(matchList);
+                                    if (null == matchedPeopleAdapter.getEngine())
+                                        matchedPeopleAdapter.setEngine(engine);
+                                    runOnUiThread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            matchedPeopleAdapter.notifyDataSetChanged();
+                                        }
+                                    });
+                                }
                                 b_liveMatching = false;
+                                faceToFollow = null;
+                                faceToMatchBitmap = null;
                             } else
-                                Log.d(TAG, "run: bound no work");
+                                Log.d(TAG, "run: isBound no work");
                         }
                     }, 0, 5000);
                     break;
@@ -2195,18 +2271,6 @@ public class MainActivity extends AppCompatActivity {
                     cameraCaptureSession.capture(captureRequestBuilder.build(), null, mBackgroundHandler);*/
                     break;
 
-                case "match":
-                    Log.d(TAG, "match mode");
-                    if(cameraCaptureSession == null)
-                        startPreview();
-                    //cameraCaptureSession.abortCaptures();
-                    captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
-                    captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
-                    captureRequestBuilder.addTarget(previewSurface);
-                    //captureRequestBuilder.addTarget(imageReader.getSurface());
-                    cameraCaptureSession.capture(captureRequestBuilder.build(), null, mBackgroundHandler);
-                    break;
-
                 default:
                     Log.d(TAG, "default mode");
                     break;
@@ -2214,25 +2278,69 @@ public class MainActivity extends AppCompatActivity {
         } catch (CameraAccessException e) {
             e.printStackTrace();
             Log.d(TAG, "updatePreview: and the reason...");
-            System.out.println("and the reason...");
             System.out.println(e.getReason());
         }
     }
 
+    /**
+     * helper function for live matching method
+     * @param info - information of enrolled person
+     * @param afid - key used in matchlist
+     * @param newafid - new afid to add
+     * @param update - determines if we are adding a new entry, or replacing already existing
+     */
+    private void addToMatchList(EnrolledInfo info, byte[] afid, byte[] newafid, boolean update){
+        info.setTimestamp(getCurrentTimeStamp());
+        if(update) {
+            Log.d(TAG, "addToMatchList: size was = "+matchList.size());
+            matchList.remove(afid);
+            Log.d(TAG, "addToMatchList: size is = "+matchList.size());
+        }
+        matchList.put(newafid, info);
+    }
+
+    public static File mugshotToFile(Bitmap b) throws IOException {
+        // save mugshot into .jpg
+        File jpegFile = new File(imageFolder, "/" + System.currentTimeMillis() + ".jpg");
+        FileOutputStream out = null;
+        try {
+            out = new FileOutputStream(jpegFile);
+            b.compress(Bitmap.CompressFormat.JPEG, 90, out);
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } finally {
+            out.flush();
+            out.close();
+        }
+        return jpegFile;
+    }
+
     private void closeCamera() {
-        if (null != cameraDevice) {
-            cameraDevice.close();
-            cameraDevice = null;
-        }
-        if (null != imageReader) {
-            imageReader.close();
-            imageReader = null;
-        }
+        try {
+            mCameraOpenCloseLock.acquire();
+            if (null != cameraCaptureSession) {
+                Log.d(TAG, "closeCamera: closing camera capture session");
+                cameraCaptureSession.close();
+                cameraCaptureSession = null;
+            }
+            if (null != cameraDevice) {
+                Log.d(TAG, "closeCamera: closing camera device");
+                cameraDevice.close();
+                cameraDevice = null;
+            }
+            if (null != imageReader) {
+                Log.d(TAG, "closeCamera: closing image reader");
+                imageReader.close();
+                imageReader = null;
+            }
+        } catch(InterruptedException e){
+            throw new RuntimeException("Interrupted while trying to lock camera closing", e);
+        } finally { mCameraOpenCloseLock.release(); }
     }
 
     public static int getMatchMin(){ return MIN_MATCH; }
 
-    public static boolean getAwake(){ return awake; }
+    public static boolean getIsAwake(){ return isAwake; }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
@@ -2299,33 +2407,61 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * blurs bitmap - used to blur image background during enrollment
+     * @param input - bitmap to blue
+     * @return - blurred bitmap
+     */
+    private Bitmap blurImage (Bitmap input)
+    {
+        RenderScript rsScript = RenderScript.create(this);
+        Allocation alloc = Allocation.createFromBitmap(rsScript, input);
 
-    class DrawingView extends SurfaceView {
+        ScriptIntrinsicBlur blur = ScriptIntrinsicBlur.create(rsScript, alloc.getElement());
+        blur.setRadius(BLUR_RADIUS);
+        blur.setInput(alloc);
 
-        private final SurfaceHolder surfaceHolder;
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Bitmap result = Bitmap.createBitmap(input.getWidth(), input.getHeight(), input.getConfig());
+        Allocation outAlloc = Allocation.createFromBitmap(rsScript, result);
+        blur.forEach(outAlloc);
+        outAlloc.copyTo(result);
 
-        public DrawingView(Context context) {
-            super(context);
-            surfaceHolder = getHolder();
-            paint.setColor(Color.RED);
-            paint.setStyle(Paint.Style.FILL);
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-            if (isTap) {
-                if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                    if (surfaceHolder.getSurface().isValid()) {
-                        Canvas canvas = surfaceHolder.lockCanvas();
-                        canvas.drawColor(Color.TRANSPARENT);
-                        canvas.drawCircle(event.getX(), event.getY(), 50, paint);
-                        surfaceHolder.unlockCanvasAndPost(canvas);
-                    }
-                }
-                return true;
-            }
-            return false;
-        }
+        rsScript.destroy();
+        return result;
     }
+
+    private Bitmap YUVtoRGBA(byte[] image, int width, int height){
+
+        ScriptIntrinsicYuvToRGB yuvToRgbIntrinsic = ScriptIntrinsicYuvToRGB.create(rs, Element.U8_4(rs));
+
+        Type.Builder yuvType = new Type.Builder(rs, Element.U8(rs)).setX(image.length);
+        Allocation in = Allocation.createTyped(rs, yuvType.create(), Allocation.USAGE_SCRIPT);
+
+
+        Type.Builder rgbaType = new Type.Builder(rs, Element.RGBA_8888(rs)).setX(width).setY(height);
+        Allocation out = Allocation.createTyped(rs, rgbaType.create(), Allocation.USAGE_SCRIPT);
+
+        in.copyFrom(image);
+
+        yuvToRgbIntrinsic.setInput(in);
+        yuvToRgbIntrinsic.forEach(out);
+
+        Bitmap bmpout = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        out.copyTo(bmpout);
+
+        return bmpout;
+    }
+
+    private Bitmap toGreyscale(Bitmap b){
+        Allocation in = Allocation.createFromBitmap(rs, b);
+        Allocation out = Allocation.createTyped(rs, in.getType());
+
+        ScriptIntrinsicColorMatrix colorMatrix = ScriptIntrinsicColorMatrix.create(rs, in.getElement());
+        colorMatrix.setGreyscale();
+        colorMatrix.forEach(in, out);
+        Bitmap expected = Bitmap.createBitmap(b.getWidth(), b.getHeight(), b.getConfig());
+        out.copyTo(expected);
+        return expected;
+    }
+
 }

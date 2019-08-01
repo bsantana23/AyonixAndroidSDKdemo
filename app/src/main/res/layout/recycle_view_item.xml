@@ -25,14 +25,6 @@
         android:textAppearance="?attr/textAppearanceListItem"
         android:textSize="18sp" />
 
-
-    <ImageView
-        android:id="@+id/matchimage"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:visibility="gone"
-        android:contentDescription="@string/matched_mugshot" />
-
     <ImageView
         android:id="@+id/checkbox"
         android:layout_width="wrap_content"
@@ -40,5 +32,12 @@
         android:src="@drawable/outline_check_box_24"
         android:visibility="gone"
         android:contentDescription="@string/check_box_to_show_selection" />
+
+    <ImageView
+        android:id="@+id/matchimage"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:contentDescription="@string/matched_mugshot" />
 
 </LinearLayout>
