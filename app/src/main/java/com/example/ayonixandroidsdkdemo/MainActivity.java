@@ -13,17 +13,12 @@ import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
-import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
-import android.graphics.YuvImage;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -52,8 +47,6 @@ import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.support.v8.renderscript.Allocation;
 import android.support.v8.renderscript.Element;
-import android.support.v8.renderscript.Matrix3f;
-import android.support.v8.renderscript.Matrix4f;
 import android.support.v8.renderscript.RenderScript;
 import android.support.v8.renderscript.Script;
 import android.support.v8.renderscript.ScriptIntrinsicBlur;
@@ -69,8 +62,6 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.Surface;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
 import android.view.animation.Animation;
@@ -89,7 +80,6 @@ import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -105,7 +95,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -146,7 +135,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
     private Size imageDimension;
     private ImageReader imageReader;
     private Button enrollButton;
-    private Button matchButton;
     protected FloatingActionButton confirmButton;
     protected FloatingActionButton cancelButton;
     protected Button clearButton;
@@ -169,7 +157,7 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
     private volatile boolean nameProvided = false;
     private volatile boolean locked = false;
     private volatile boolean match = false;
-    private volatile boolean draw = true;
+    private static volatile boolean draw = true;
     private volatile static boolean foundFace = false;
     private volatile static boolean isAwake = true;
     private volatile static boolean b_followFace = false;
@@ -177,6 +165,10 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
     private volatile static boolean b_liveMatching = false;
     private boolean isBound = false;
     private boolean unlockServiceOff = true;
+    private volatile static boolean threadStarted = false;
+    private static boolean matched;
+    private static int trackerID;
+    private static byte[] matchedAfid;
 
     private AyonixFaceID engine;
     private static AyonixFaceTracker faceTracker;
@@ -200,31 +192,12 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
     private Semaphore mCameraOpenCloseLock = new Semaphore(1);
 
     //protected HashMap<byte[], ArrayList<File>> masterList = null;
-    private HashMap<byte[], EnrolledInfo> masterList = null;
+    private static HashMap<byte[], EnrolledInfo> masterList = null;
     private LinkedHashMap<byte[], EnrolledInfo> matchList  = new LinkedHashMap<>();
     private Vector<AyonixFace> facesToShow  = new Vector<>();
     private Vector<AyonixFace> facesToMatch = new Vector<>();
     private Vector<Bitmap> bitmapsToMatch = new Vector<>();
     private Vector<Bitmap> bitmapsToShow = new Vector<>();
-
-    /**
-     * Number of bitmaps that is used for RenderScript thread and UI thread synchronization.
-     */
-    private final int NUM_BITMAPS = 2;
-    private int mCurrentBitmap = 0;
-    private Bitmap mBitmapIn;
-    private Bitmap[] mBitmapsOut;
-    private ImageView mImageView;
-
-    private Allocation mInAllocation;
-    private Allocation[] mOutAllocations;
-
-    /**
-     * Temporary list to hold onto newly created afids used to match for match list.
-     */
-    //private Vector<byte[]> afidList = new Vector<>();
-    private HashMap<byte[], MatchedInfo> afidList = new HashMap<>();
-
     private List<Surface> outputSurfaces = new ArrayList<>(2);
 
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
@@ -246,7 +219,7 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
     private static final int MAXIMAGES = 2;
     private static final float QUALITY_THRESHOLD = 0.65f;
     private static final float BITMAP_SCALE = 0.4f;
-    private static final float BLUR_RADIUS = 20;
+    private static final float BLUR_RADIUS = 2;
     private static final float CROPSCALE = 1.5f;
 
     /**
@@ -261,7 +234,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
     private float scalingRatio;
     private int bitmapWidth;
     private int bitmapHeight;
-    private int trackerID = -1;
     private float faceQuality = 0f;
 
 
@@ -275,6 +247,7 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
     private static File imageFolder = null;
 
     private MyGLRenderer renderer;
+    private FollowFace_OpenGLThread followFaceOpenGLThread;
 
     private TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
         @Override
@@ -326,7 +299,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
             cancelButton.hide();
             confirmButton.hide();
             enrollButton.setVisibility(View.VISIBLE);
-            matchButton.setVisibility(View.VISIBLE);
             confirmMode = "default";
                 /*facesToShow.clear();
                 runOnUiThread(new Runnable() {
@@ -381,7 +353,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
             mode = "match";
             Log.d(TAG, "matching...\n");
             enrollButton.setVisibility(View.GONE);
-            matchButton.setVisibility(View.GONE);
             updatePreview();
         }
     };
@@ -400,13 +371,16 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                 Log.d(TAG, "setImageReader: gotcha");
                 e.printStackTrace();
             }
-            imageToBlur = blurImage(textureView.getBitmap());
+            Bitmap b = scaleBitmap(textureView.getBitmap(), 125, true);
+            long start = System.currentTimeMillis();
+            imageToBlur = blurImage(b);
+            long end = System.currentTimeMillis();
+            Log.d(TAG, "onClick: time to blur image: " + (end-start));
             blurView.setImageBitmap(imageToBlur);
             blurView.setVisibility(View.VISIBLE);
             enroll = true;
             draw = false;
             enrollButton.setVisibility(View.GONE);
-            matchButton.setVisibility(View.GONE);
             Log.d(TAG, "enrolling...\n");
             mode = "enroll";
             updatePreview();
@@ -471,7 +445,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                                     cancelButton.hide();
                                     confirmButton.hide();
                                     enrollButton.setVisibility(View.VISIBLE);
-                                    matchButton.setVisibility(View.VISIBLE);
                                     confirmMode = "default";
                                     mode = "main";
                                     updatePreview();
@@ -515,16 +488,17 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
             switch (mode) {
                 case "main":
                     Log.d(TAG, "image available from recording");
-                    Log.d(TAG, "onImageAvailable: reader = "+ imageReader);
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         Log.d(TAG, "mainMode: entered main mode method");
+
+                        start = System.currentTimeMillis();
 
                         imageWidth = image.getWidth();
                         imageHeight = image.getHeight();
                         Log.d(TAG, "onImageAvailable: image widthXheight: " + imageWidth + "X" + imageHeight);
 
-                        bitmap = YUV_420_888_toRGB(image, width, height);
+                        bitmap = YUV_420_888_toRGB(image, imageWidth, imageHeight);
                         pixels = new int[bitmap.getWidth() * bitmap.getHeight()];
                         gray = new byte[bitmap.getWidth() * bitmap.getHeight()];
                         image.close();
@@ -534,9 +508,16 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                         greyscaleBitmap = bitmap.copy(bitmap.getConfig(), true);
                         bitmapWidth = bitmap.getWidth();
                         bitmapHeight = bitmap.getHeight();
+
+                        if(!threadStarted) {
+                            followFaceOpenGLThread = new FollowFace_OpenGLThread(renderer, engine,
+                                    bitmapHeight, bitmapWidth, glSurfaceView);
+                            followFaceOpenGLThread.start();
+                            threadStarted = true;
+                        }
+
                         //bitmap.getPixels(pixels, 0, height, 0, 0, height, width);
 
-                        start = System.currentTimeMillis();
                         Mat tmp = new Mat(bitmapWidth, bitmapHeight, CvType.CV_8UC1);
                         Utils.bitmapToMat(bitmap, tmp);
                         Imgproc.cvtColor(tmp, tmp, Imgproc.COLOR_RGB2GRAY);
@@ -545,16 +526,13 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                         Utils.matToBitmap(tmp, greyscaleBitmap);
                         greyscaleBitmap.getPixels(pixels, 0, greyscaleBitmap.getWidth(),
                                 0, 0, greyscaleBitmap.getWidth(), greyscaleBitmap.getHeight());
-                        end = System.currentTimeMillis();
-                        Log.d(TAG, "onImageAvailable: elapsed time to convert to grayscale and get pixels[]: " + (end - start));
 
-                        start = System.currentTimeMillis();
                         for (int i = 0; i < pixels.length; i++) {
                             //gray[i] = (byte) (255 * Color.luminance(pixels[i]));
                             gray[i] = (byte) pixels[i];
                         }
                         end = System.currentTimeMillis();
-                        Log.d(TAG, "onImageAvailable: elapsed time to convert to byte[]: " + (end - start));
+                        Log.d(TAG, "onImageAvailable: elapsed time to get image and extract pixels: " + (end - start));
 
                         /*Image.Plane plane = image.getPlanes()[0];
                         ByteBuffer buffer = plane.getBuffer();
@@ -573,7 +551,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                             gray[i] = (byte) pixels[i];
                         }*/
 
-                        //Log.d(TAG, "onImageAvailable: bitmap width: " + greyscaleBitmap.getWidth() + ", bitmap height: " + bitmap.getHeight());
                         frame = new AyonixImage(imageHeight, imageWidth, false, imageHeight, gray);
                         AyonixFace[] deFaces = new AyonixFace[0];
                         try {
@@ -583,12 +560,11 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                         }
 
                         textView.setText(null);
-
                         foundFace = false;
-
+                        int counter = 0; //used to check if there 0 faces
 
                         for (AyonixFace face : deFaces) {
-
+                            counter++;
                             String info = (
                                     "Face[" + (face.trackerCount) + "] : \n" +
                                     "       " + (face.gender > 0 ? "female" : "male") + "\n" +
@@ -601,115 +577,44 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                                     "       yaw: " + (int) (face.yaw) + "\n" +
                                     "       tracker id: " + face.trackerId);
                             System.out.println(info);
-                            followFace(face);
 
-                            if (trackerID == -1) {
-                                Log.d(TAG, "onImageAvailable: setting tracker to " + face.trackerId);
-                                trackerID = face.trackerId;
+                            if ((int) face.roll < -20 || (int) face.roll > 20) {
+                                showAToast("Please straighten your head upright.", toast);
+
+                            } else if ((int) face.yaw < -13 || (int) face.yaw > 13) {
+                                showAToast("Please face the camera.", toast);
 
                             } else {
-                                if (trackerID == face.trackerId) {
-                                        if ((int) face.roll < -20 || (int) face.roll > 20) {
-                                            showAToast("Please straighten your head upright.", toast);
+                                foundFace = true;
+                                //b_followFace = true;
 
-                                        } else if ((int) face.yaw < -13 || (int) face.yaw > 13) {
-                                            showAToast("Please face the camera.", toast);
-
-                                        } else {
-                                            foundFace = true;
-                                            //b_followFace = true;
-
-                                            if (face.location.y > 0 && face.location.x > 0) {
-                                                //check if scaled coordinates are within the views boundaries
-                                                int x = (face.location.x - Math.round((face.location.w / 2f) * (CROPSCALE - 1)) > 0) ?
-                                                        face.location.x - Math.round((face.location.w / 2f) * (CROPSCALE - 1)) :
-                                                        face.location.x;
-                                                int y = (face.location.y - Math.round((face.location.h / 2f) * (CROPSCALE - 1)) > 0) ?
-                                                        face.location.y - Math.round((face.location.h / 2f) * (CROPSCALE - 1)) :
-                                                        face.location.y;
-                                                int w = Math.round(face.location.w * CROPSCALE);
-                                                int h = Math.round(face.location.h * CROPSCALE);
-                                                if ((x + w < bitmap.getWidth()) && (y + h <= bitmap.getHeight())) {
-                                                    Log.d(TAG, "onImageAvailable: cropping image and adding to faces to match");
-                                                    if(!b_liveMatching) {
-                                                        Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, x, y, w, h);
-                                                        faceToMatchBitmap = croppedBitmap;
-                                                        faceToFollow = face;
-                                                        b_checkMatched = true;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                } else {
-                                    //TODO need to handle case of more than face in frame
-                                    Log.d(TAG, "onImageAvailable: setting tracker from" + trackerID +
-                                            " to " + face.trackerId);
-                                    trackerID = face.trackerId;
-                                    faceQuality = face.quality;
-                                }
-                            }
-
-
-                        /*for (AyonixFace face : deFaces) {
-                            if (face != null) {
-                                if ((int) face.roll < -20 || (int) face.roll > 20) {
-                                    showAToast("Please straighten your head upright.", toast);
-
-                                } else if ((int) face.yaw < -13 || (int) face.yaw > 13) {
-                                    showAToast("Please face the camera.", toast);
-
-                                } else {
-                                    foundFace = true;
-                                    faceToFollow = face;
-                                    b_followFace = true;
-
-                                    if(face.location.y > 0 && face.location.x > 0) {
-                                        //check if scaled coordinates are within the views boundaries
-                                        int x = (face.location.x-Math.round((face.location.w/2f)*(CROPSCALE-1)) > 0) ?
-                                                face.location.x-Math.round((face.location.w/2f)*(CROPSCALE-1)) :
-                                                face.location.x;
-                                        int y = (face.location.y-Math.round((face.location.h/2f)*(CROPSCALE-1)) > 0) ?
-                                                face.location.y-Math.round((face.location.h/2f)*(CROPSCALE-1)) :
-                                                face.location.y;
-                                        int w = Math.round(face.location.w*CROPSCALE);
-                                        int h = Math.round(face.location.h*CROPSCALE);
-                                        if((x+w < bitmap.getWidth()) && (y+h <= bitmap.getHeight())) {
-                                            Log.d(TAG, "onImageAvailable: cropping image and adding to faces to match");
+                                if (face.location.y > 0 && face.location.x > 0) {
+                                    //check if scaled coordinates are within the views boundaries
+                                    int x = (face.location.x - Math.round((face.location.w / 2f) * (CROPSCALE - 1)) > 0) ?
+                                            face.location.x - Math.round((face.location.w / 2f) * (CROPSCALE - 1)) :
+                                            face.location.x;
+                                    int y = (face.location.y - Math.round((face.location.h / 2f) * (CROPSCALE - 1)) > 0) ?
+                                            face.location.y - Math.round((face.location.h / 2f) * (CROPSCALE - 1)) :
+                                            face.location.y;
+                                    int w = Math.round(face.location.w * CROPSCALE);
+                                    int h = Math.round(face.location.h * CROPSCALE);
+                                    if ((x + w < bitmap.getWidth()) && (y + h <= bitmap.getHeight())) {
+                                        Log.d(TAG, "onImageAvailable: cropping image and adding to faces to match");
+                                        if(!b_liveMatching) {
                                             Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, x, y, w, h);
-                                            if(!b_liveMatching) {
-                                                facesToMatch.add(face);
-                                                bitmapsToMatch.add(croppedBitmap);
-                                            }
+                                            faceToMatchBitmap = croppedBitmap;
+                                            faceToFollow = face;
+                                            b_checkMatched = true;
                                         }
                                     }
-
-                                    if(face.quality > minQuality) {
-                                        minQuality = face.quality;
-                                        faceToMatch_opengl = face;
-                                        b_checkMatched = true;
-                                    }
-
-                                    Log.d(TAG, "imageDimensions width: " + imageDimension.getWidth() + ", height: "+ imageDimension.getHeight());
-                                    Log.d(TAG, "view dimentions width: " + textureView.getWidth() + ", height: " + textureView.getHeight());
-                                    Log.d(TAG, "bitmap dimensions width: " + bitmap.getWidth() + ", height: " + bitmap.getHeight());
-                                    Log.d(TAG, "actual image width: " + imageWidth + ", height: " + imageHeight);
-
-                                    String info = (
-                                            "Face[" + (face.trackerCount) + "] : \n" +
-                                            "       " + (face.gender > 0 ? "female" : "male") + "\n" +
-                                            "       " + (int) face.age + "y\n" +
-                                            "       " + (face.expression.smile > 0.1 ? "smiling" : "no smile") + "\n" + //face.expression.smile < -0.9 ? "frowning" : "neutral") + "\n" +
-                                            "       mouth open: " + Math.round(face.expression.mouthOpen * 100) + "%" + "\n" +
-                                            "       quality: " + Math.round(face.quality * 100) + "%" + "\n" +
-                                            "       roll: " + (int) (face.roll) + "\n" +
-                                            "       pitch: " + (int) (face.pitch) + "\n" +
-                                            "       yaw: " + (int) (face.yaw) + "\n" +
-                                            "       tracker id: " + face.trackerId);
-                                    System.out.println(info);
                                 }
                             }
-                        }*/
+
+                            followFace(face);
                         }
+                        if(counter == 0)
+                            Log.d(TAG, "onImageAvailable: no faces foud");
+
                     }
                     if(image != null)
                         image.close();
@@ -727,12 +632,11 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                             // get image dimensions
                             width = image.getWidth();
                             height = image.getHeight();
-                            gray = new byte[width * height];
 
                             // convert image from YUV420888 --> RGB bitmap
                             bitmap = YUV_420_888_toRGB(image, width, height);
-                            System.out.println("bitmap; " + bitmap);
                             pixels = new int[bitmap.getWidth() * bitmap.getHeight()];
+                            gray = new byte[bitmap.getWidth() * bitmap.getHeight()];
 
                             // rotate bitmap appropriately
                             bitmap = rotateImage(bitmap);
@@ -917,7 +821,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                                 @Override
                                 public void run() {
                                     enrollButton.setVisibility(View.VISIBLE);
-                                    matchButton.setVisibility(View.VISIBLE);
                                     recyclerView.setVisibility(View.INVISIBLE);
                                 }
                             });
@@ -931,11 +834,10 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                             @Override
                             public void run() {
                                 enrollButton.setVisibility(View.VISIBLE);
-                                matchButton.setVisibility(View.VISIBLE);
                                 recyclerView.setVisibility(View.INVISIBLE);
                             }
                         });
-                        Log.d(TAG, "onImageAvailable: leaving enrollment");
+                        Log.d(TAG, "onImageAvailable: leaving enrollment - face is null");
                         facesToShow.clear();
                         mode = "main";
                         updatePreview();
@@ -996,20 +898,11 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
     private void followFace(AyonixFace face) {
         if(draw && face != null) {
             Log.d(TAG, "followFace: following face");
-            float currMugArea = face.location.w*face.location.h;
 
-            if(prevMugArea == 0.0f) {
-                Log.d(TAG, "followFace: why we hurrrr");
-                prevMugArea = currMugArea;
-                renderer.setScale(1);
-            }
-            else{
-                Log.d(TAG, "followFace: current / previous : " + currMugArea + "/" + prevMugArea);
-                scalingRatio = currMugArea/prevMugArea;
-                Log.d(TAG, "followFace: scaling ratio = " + scalingRatio);
-                prevMugArea = currMugArea;
-                renderer.setScale(scalingRatio);
-            }
+            scalingRatio = (.0045f*face.location.w);
+            Log.d(TAG, "followFace: scaling ratio = " + scalingRatio);
+
+            renderer.setScale(scalingRatio);
             renderer.setAngle(face.roll);
             renderer.setColor(checkMatched(face));
             renderer.setTranslateX((2.0f * (bitmapWidth  - face.location.x - (face.location.w/2.0f)) / bitmapWidth)  - 1.0f);  //?????????
@@ -1020,7 +913,9 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
     }
 
     private float[] checkMatched(AyonixFace face){
-        boolean matched = false;
+        matched = false;
+        matchedAfid = null;
+        trackerID = -1;
         if(b_checkMatched) {
             final Vector<byte[]> afids = new Vector<>(masterList.keySet());
             float[] scores = new float[afids.size()];
@@ -1030,10 +925,11 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                 Log.d(TAG, "checkMatched: afid list size = "+afids.size());
                 engine.MatchAfids(afid, afids, scores);
                 for (int j = 0; j < scores.length; j++) {
-                    if (scores[j] * 100 >= MainActivity.MIN_MATCH) {
+                    if (scores[j] * 100 >= MIN_MATCH) {
                         minQuality = 0.5f;
                         b_checkMatched = false;
                         matched = true;
+                        matchedAfid = afids.get(j);
                     }
                 }
             } catch (AyonixException e) { e.printStackTrace(); }
@@ -1042,6 +938,7 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                 minQuality = 0.5f;
             }
         }
+        trackerID = face.trackerId;
         return setColor(face.gender, matched);
     }
 
@@ -1091,7 +988,7 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
         }
     }
 
-    public boolean getDraw(){ return draw; }
+    public static boolean getDraw(){ return draw; }
 
     public void showAToast (String st, Toast toast){ //"Toast toast" is declared in the class
         if (toast.getView().isShown()) {
@@ -1126,7 +1023,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                     enrolledRecyclerView.setVisibility(View.VISIBLE);
                     clearButton.setVisibility(View.VISIBLE);
                     enrollButton.setVisibility(View.INVISIBLE);
-                    matchButton.setVisibility(View.INVISIBLE);
                     if (!isTap)
                         textView.setText(null);
                     enrolledListOnLeft = false;
@@ -1140,7 +1036,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                 matchedRecyclerView.startAnimation(animation);
                 matchedRecyclerView.setVisibility(View.INVISIBLE);
                 enrollButton.setVisibility(View.VISIBLE);
-                matchButton.setVisibility(View.VISIBLE);
                 matchedListOnRight = true;
             }
         } else
@@ -1175,7 +1070,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                     matchedRecyclerView.setVisibility(View.VISIBLE);
                     matchedListOnRight = false;
                     enrollButton.setVisibility(View.INVISIBLE);
-                    matchButton.setVisibility(View.INVISIBLE);
                 }
             } else {
                 Log.d(TAG, "onSwipeLeft: hiding enrolled");
@@ -1190,7 +1084,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                 clearButton.setVisibility(View.GONE);
                 removeButton.setVisibility(View.GONE);
                 enrollButton.setVisibility(View.VISIBLE);
-                matchButton.setVisibility(View.VISIBLE);
             }
         }
     }
@@ -1251,7 +1144,7 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
         matchListFile = matchFolder.toString() + "/matchlist";
 
         setMasterList();
-        //setMatchList();
+        setMatchList();
 
         //set up local broadcasts to either unlock phone at lock screen, or restart service when terminated
         IntentFilter filter = new IntentFilter("unlock");
@@ -1394,10 +1287,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
         assert enrollButton != null;
         enrollButton.setOnClickListener(enrollClick);
         Log.d(TAG, "enroll button created.");
-
-        matchButton = findViewById(R.id.btn_match);
-        assert matchButton != null;
-        matchButton.setOnClickListener(matchClick);
 
         removeButton = findViewById(R.id.btn_remove);
         assert removeButton != null;
@@ -1568,7 +1457,6 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                     public void run() {
                         Log.d(TAG, "run: chosen points failed in enrollment");
                         enrollButton.setVisibility(View.VISIBLE);
-                        matchButton.setVisibility(View.VISIBLE);
                     }
                 });
                 return false;
@@ -1813,7 +1701,7 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
         stopBackgroundThread();
         unbindService(connection);
         saveMasterList();
-        //saveMatchList();
+        saveMatchList();
         super.onPause();
         glSurfaceView.onPause();
         isAwake = false;
@@ -2235,7 +2123,7 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                                 b_liveMatching = true;
                                 matchListService.setMasterList(masterList);
                                 matchListService.setMatchList(matchList);
-                                if(matchListService.liveMatchingv2(faceToFollow, faceToMatchBitmap) == 1) {
+                                if(matchListService.liveMatching(faceToFollow, faceToMatchBitmap) == 1) {
                                     matchList = matchListService.getMatchList();
                                     Log.d(TAG, "run: match list size after matching is " + matchList.size());
                                     matchedPeopleAdapter.setMasterList(masterList);
@@ -2255,7 +2143,7 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
                             } else
                                 Log.d(TAG, "run: isBound no work");
                         }
-                    }, 0, 5000);
+                    }, 0, 7000);
                     break;
 
                 case "enroll":
@@ -2463,5 +2351,13 @@ public class MainActivity<faceToFollow> extends AppCompatActivity {
         out.copyTo(expected);
         return expected;
     }
+
+    public static boolean getCheckMatch(){ return b_checkMatched; }
+    public static void setCheckMatch(boolean b){ b_checkMatched = b; }
+    public static HashMap<byte[], EnrolledInfo> getMasterList(){ return masterList; }
+    public static int getTrackerID(){ return trackerID; }
+    public static boolean getMatched(){ return matched; }
+    public static byte[] getMatchedAfid(){ return matchedAfid; }
+
 
 }

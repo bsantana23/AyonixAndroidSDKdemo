@@ -59,8 +59,8 @@ public class MatchedPeopleAdapter extends RecyclerView.Adapter<MatchedPeopleAdap
         else
             viewHolder.itemView.setBackgroundColor(Color.parseColor("#A8D9F8"));
         afidKeySet = new Vector<>(matchedPeople.keySet());
-        if((afidKeySet != null) &&(index < afidKeySet.size())) {
-            byte[] key = afidKeySet.elementAt(index);
+        if(index < afidKeySet.size()) {
+            byte[] key = afidKeySet.elementAt(afidKeySet.size()-(index+1));
             if(matchedPeople.containsKey(key))
                 viewHolder.bind(matchedPeople.get(key));
             else
@@ -140,10 +140,20 @@ public class MatchedPeopleAdapter extends RecyclerView.Adapter<MatchedPeopleAdap
                         ;
                 info.append(information);
 
+                Log.d(TAG, "bind: enrolled = "+enrolledInfo.getEnrolled() + ", matched = "+enrolledInfo.getMatched());
+
                 if(enrolledInfo.getEnrolled()){
-                    Bitmap bm = BitmapFactory.decodeFile(enrolledInfo.getMugshots().get(0).getAbsolutePath());
+                    Bitmap bm;
+                    if(!enrolledInfo.getMugshots().isEmpty()){
+                        bm = BitmapFactory.decodeFile(enrolledInfo.getMugshots().get(0).getAbsolutePath());
+                        enrolledMugshot.setImageBitmap(bm);
+                    } else if(enrolledInfo.getMugshotMatched() != null){
+                        bm = BitmapFactory.decodeFile(enrolledInfo.getMugshotMatched().getAbsolutePath());
+                        enrolledMugshot.setImageBitmap(bm);
+                    } else{
+                        enrolledMugshot.setImageResource(R.mipmap.baseline_sentiment_dissatisfied_black_48);
+                    }
                     //bm = MainActivity.scaleBitmap(bm, 350, true);
-                    enrolledMugshot.setImageBitmap(bm);
                 } else if (enrolledInfo.getMatched() && !enrolledInfo.getEnrolled() ) {
                     if(null == enrolledInfo.getMugshotMatched())
                         enrolledMugshot.setImageResource(R.mipmap.baseline_sentiment_dissatisfied_black_48);

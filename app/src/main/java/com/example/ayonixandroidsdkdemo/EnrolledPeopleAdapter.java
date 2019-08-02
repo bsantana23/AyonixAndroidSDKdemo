@@ -19,6 +19,10 @@ import android.widget.TextView;
 import java.util.HashMap;
 import java.util.Vector;
 
+/**
+ * Recycler View adapter that populates the enrolled list
+ */
+
 public class EnrolledPeopleAdapter extends RecyclerView.Adapter<EnrolledPeopleAdapter.MyViewHolder> {
     private MainActivity context;
     private HashMap<byte[], EnrolledInfo> enrolledPeople;

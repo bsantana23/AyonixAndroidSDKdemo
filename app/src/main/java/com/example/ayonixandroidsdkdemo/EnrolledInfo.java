@@ -8,6 +8,10 @@ import java.util.ArrayList;
 
 import ayonix.AyonixImage;
 
+/**
+ * Holds information to store matched and enrolled persons
+ */
+
 public class EnrolledInfo implements Serializable {
 
     private ArrayList<File> allMugshots; // list of all saved mugshots      {enrollment}
@@ -49,6 +53,7 @@ public class EnrolledInfo implements Serializable {
     public int getAge() {
         return age;
     }
+    public void setAge(int age){ this.age = age; }
 
     public void setTimestamp(String time) {
         timestamp = time;
